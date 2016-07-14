@@ -6,7 +6,7 @@ from keras.layers.recurrent import LSTM
 
 
 def simple_lstm(n_chars, context=10, hidden_layer=128):
-    in_layer = Input(shape=(context * 2, 1))
+    in_layer = Input(shape=(context * 2,))
     lstm = LSTM(output_dim=hidden_layer, name='lstm')(in_layer)
     out_layer = Dense(output_dim=n_chars, activation='softmax')(lstm)
     model = Model(input=in_layer, output=out_layer)
@@ -15,7 +15,7 @@ def simple_lstm(n_chars, context=10, hidden_layer=128):
 
 
 def bilstm(n_chars, context=10, hidden_layer=128, rnn_layers=1):
-    in_layer = Input(shape=(context * 2, 1))
+    in_layer = Input(shape=(context * 2,))
     bilstm = None
     for i in range(rnn_layers):
         if i == 0:

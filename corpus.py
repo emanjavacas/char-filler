@@ -23,7 +23,7 @@ def pad(items, maxlen, paditem=0, paddir='left'):
         return items + (maxlen - n_items) * [paditem]
 
 
-def lines_from_file(self, fname):
+def lines_from_file(fname):
     with open(fname, 'r') as f:
         for line in f:
             yield line
@@ -105,17 +105,15 @@ class Indexer(object):
 
 
 class Corpus(object):
-    def __init__(self, root, char_indexer, context=10, side='both'):
+    def __init__(self, root, context=10, side='both'):
         """
         Parameters:
         ------------
         root: str/generator, source of lines. If str, it is coerced to file/dir
-        char_indexer: an object implementing encode() to index chars as ints
         context: int, context characters around target char
         side: str, one of 'left', 'right', 'both', context origin
         """
         self.root = root
-        self.char_indexer = char_indexer
         self.context = context
         if side not in {'left', 'right', 'both'}:
             raise ValueError('Invalid side value [%s]' % side)
@@ -123,21 +121,22 @@ class Corpus(object):
 
     def _encode_line(self, line, indexer, **kwargs):
         encoded_line = [indexer.encode(c, **kwargs) for c in line]
+        maxlen = len(encoded_line)
         for idx, c in enumerate(encoded_line):
             minidx = max(0, idx - self.context)
-            maxidx = min(len(encoded_line), idx + self.context + 1)
+            maxidx = min(maxlen, idx + self.context + 1)
             if self.side in {'left', 'both'}:
-                left = pad(encoded_line[minidx: idx + 1],
+                left = pad(encoded_line[minidx: idx],
                            self.context, paddir='left')
             if self.side in {'right', 'both'}:
                 right = pad(encoded_line[idx + 1: maxidx],
                             self.context, paddir='right')
             if self.side == 'left':
-                yield left, idx
+                yield left, c
             elif self.side == 'right':
-                yield right, idx
+                yield right, c
             else:
-                yield left + right, idx
+                yield left + right, c
 
     def chars(self):
         """
@@ -151,8 +150,8 @@ class Corpus(object):
                     yield char
         elif isinstance(self.root, str):
             if os.path.isdir(self.root):
-                for f in os.path.listdir(self.root):
-                    for line in lines_from_file(self.root):
+                for f in os.listdir(self.root):
+                    for line in lines_from_file(os.path.join(self.root, f)):
                         for char in line:
                             yield char
             elif os.path.isfile(self.root):
@@ -172,8 +171,8 @@ class Corpus(object):
                     yield context, label
         elif isinstance(self.root, str):
             if os.path.isdir(self.root):
-                for f in os.path.listdir(self.root):
-                    for l in lines_from_file(f):
+                for f in os.listdir(self.root):
+                    for l in lines_from_file(os.path.join(self.root, f)):
                         for context, label in self._encode_line(l, idxr, **kwargs):
                             yield context, label
             elif os.path.isfile(self.root):
@@ -190,7 +189,6 @@ class Corpus(object):
         contexts, labels, n = [], [], 0
         gen = self.generate(indexer, **kwargs)
         while True:
-            n += 1
             try:
                 context, label = next(gen)
                 if n % batch_size == 0 and contexts:
@@ -198,5 +196,6 @@ class Corpus(object):
                     contexts, labels = [], []
                 else:
                     contexts.append(context), labels.append(label)
+                n += 1
             except StopIteration:
                 break
