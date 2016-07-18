@@ -59,21 +59,21 @@ class Indexer(object):
     def vocab_len(self):
         return len(self.encoder)
 
-    def encode(self, s, ignore_oovs=False, oov_idx=None):
+    def encode(self, s, oov_idx=None):
         """
         Parameters:
         -----------
         s: object, object to index
-        ignore_oovs: bool, whether to ignore OOVs, useful for indexing test set
-        oov_idx: int or None, index for OOVs
+        oov_idx: int or None, if None new indices are assigned to previously
+        unseen items (OOVs), if int oov_idx is returned for OOVs
 
         Returns:
         --------
-        idx (int) or None if s is OOV and ignore_oovs is True
+        idx (int)
         """
         if s in self.encoder:
             return self.encoder[s]
-        elif ignore_oovs:
+        elif oov_idx:
             return oov_idx
         else:
             idx = self._current
@@ -91,8 +91,7 @@ class Indexer(object):
             return self._extra[idx]
 
     def encode_seq(self, seq):
-        for x in seq:
-            yield self.encode(x)
+        return [self.encode(x) for x in seq]
 
     def save(self, filename):
         with open(filename, 'wb') as f:
@@ -195,7 +194,8 @@ class Corpus(object):
                     yield contexts, labels
                     contexts, labels = [], []
                 else:
-                    contexts.append(context), labels.append(label)
-                n += 1
+                    contexts.append(context)
+                    labels.append(label)
+                    n += 1
             except StopIteration:
                 break
