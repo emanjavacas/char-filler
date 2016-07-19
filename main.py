@@ -2,6 +2,8 @@
 
 import numpy as np
 from keras.utils.np_utils import to_categorical
+from argparse import ArgumentParser
+
 
 from models.lstms import simple_lstm, bilstm
 from corpus import Indexer, Corpus
@@ -13,7 +15,7 @@ BATCH_SIZE = 128
 NUM_BATCHES = 10000
 
 
-def build_set(corpus, idxr, size=1000):
+def build_set(corpus, idxr, size=2000):
     dataset = take(corpus.generate(idxr, oov_idx=1), size)
     X, y = list(zip(*dataset))
     X = np.asarray(X)
@@ -23,6 +25,11 @@ def build_set(corpus, idxr, size=1000):
 
 
 if __name__ == '__main__':
+    parser = ArgumentParser()
+    parser.add_argument('-r', '--root', type=str)
+    args = parser.parse_args()
+    root = args.root if args.root else root
+
     idxr = Indexer(reserved={0: 'padding', 1: 'OOV'})
     train = Corpus(root + 'train')
     test = Corpus(root + 'test')
@@ -43,7 +50,7 @@ if __name__ == '__main__':
     model = bilstm(idxr.vocab_len(), metrics=['accuracy'])
 
     print("Starting training")
-    epochs = 1000
+    epochs = 5
 
     for e in range(epochs):
         losses = []
@@ -59,3 +66,7 @@ if __name__ == '__main__':
                 _, dev_acc = model.test_on_batch(X_dev, y_dev)
                 print("Epoch: %d, Loss: %.4f, Dev acc: %.4f" %
                       (e, np.mean(losses), dev_acc))
+    # Final
+    _, test_acc = model.test_on_batch(X_test, y_test)
+    print("Test acc: %.4f" % test_acc)
+    model.save_weights('bilstm.h5')
