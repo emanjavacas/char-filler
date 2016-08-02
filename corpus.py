@@ -3,6 +3,7 @@
 import os
 import types
 import pickle as p  # python3
+import json
 
 
 def pad(items, maxlen, paditem=0, paddir='left'):
@@ -27,6 +28,13 @@ def lines_from_file(fname):
     with open(fname, 'r') as f:
         for line in f:
             yield line
+
+
+def indexer_from_dict(d):
+    indexer = Indexer()
+    indexer.encoder = d['encoder']
+    indexer.decoder = {int(k): v for (k, v) in d['decoder']}
+    return indexer
 
 
 class Indexer(object):
@@ -93,14 +101,29 @@ class Indexer(object):
     def encode_seq(self, seq):
         return [self.encode(x) for x in seq]
 
-    def save(self, filename):
-        with open(filename, 'wb') as f:
-            p.dump(self, f)
+    def _to_json(self):
+        return {'encoder': self.encoder, 'decoder': self.decoder}
+
+    def save(self, fname, mode='json'):
+        if mode == 'json':
+            with open(fname, 'w') as f:
+                json.dump(self._to_json(), f)
+        elif mode == 'pickle':
+            with open(fname, 'wb') as f:
+                p.dump(self, f)
+        else:
+            raise ValueError('Unrecognized mode %s' % mode)
 
     @staticmethod
-    def load(self, filename):
-        with open(filename, 'rb') as f:
-            return p.load(f)
+    def load(fname, mode='json'):
+        if mode == 'pickle':
+            with open(fname, 'rb') as f:
+                return p.load(f)
+        elif mode == 'json':
+            with open(fname, 'r') as f:
+                return indexer_from_dict(json.load(f))
+        else:
+            raise ValueError('Unrecognized mode %s' % mode)
 
 
 class Corpus(object):
@@ -158,7 +181,7 @@ class Corpus(object):
                     for char in line:
                         yield char
 
-    def generate(self, idxr, **kwargs):
+    def generate(self, indexer, **kwargs):
         """
         Returns:
         --------
@@ -166,18 +189,18 @@ class Corpus(object):
         """
         if isinstance(self.root, types.GeneratorType):
             for line in self.root:
-                for context, label in self._encode_line(line, idxr, **kwargs):
-                    yield context, label
+                for c, l in self._encode_line(line, indexer, **kwargs):
+                    yield c, l
         elif isinstance(self.root, str):
             if os.path.isdir(self.root):
                 for f in os.listdir(self.root):
                     for l in lines_from_file(os.path.join(self.root, f)):
-                        for context, label in self._encode_line(l, idxr, **kwargs):
-                            yield context, label
+                        for c, l in self._encode_line(l, indexer, **kwargs):
+                            yield c, l
             elif os.path.isfile(self.root):
                 for line in lines_from_file(self.root):
-                    for context, label in self._encode_line(line, idxr, **kwargs):
-                        yield context, label
+                    for c, l in self._encode_line(line, indexer, **kwargs):
+                        yield c, l
 
     def generate_batches(self, indexer, batch_size=128, **kwargs):
         """
