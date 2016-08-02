@@ -1,11 +1,21 @@
 #!/usr/bin/env python
 
-root = "/home/enrique/corpora/EEBO/"
+import json
 
 
 def save_ndarray(ndarray, fname):
     with open(fname, 'wb') as f:
         ndarray.dump(f)
+
+
+def dump_json(obj, fname):
+    with open(fname, 'w') as f:
+        json.dump(obj, f)
+
+
+def load_json(fname):
+    with open(fname, 'r') as f:
+        return json.load(f)
 
 
 def take(g, n):
@@ -18,9 +28,17 @@ def take(g, n):
 
 
 if __name__ == '__main__':
-    from corpus import Corpus, Indexer
+    from argparse import ArgumentParser
     import numpy as np
+
+    from corpus import Corpus, Indexer
     from keras.utils.np_utils import to_categorical
+
+    parser = ArgumentParser()
+    parser.add_argument('-r', '--root', type=str, required=True)
+    args = parser.parse_args()
+
+    root = args.root
 
     idxr = Indexer(reserved={0: 'padding', 1: 'OOV'})
     train = Corpus(root + 'train')
