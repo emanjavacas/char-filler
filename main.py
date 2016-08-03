@@ -27,12 +27,17 @@ def build_set(corpus, idxr, size=2000):
 
 if __name__ == '__main__':
     parser = ArgumentParser()
+    parser.add_argument('model', type=str)
+    parser.add_argument('-R', '--rnn_layers', type=int, default=1)
+    parser.add_argument('-m', '--emb_dim', type=int, default=50)
     parser.add_argument('-r', '--root', type=str, required=True)
     parser.add_argument('-e', '--epochs', type=int, default=10)
     parser.add_argument('-b', '--batch_size', type=int, default=128)
     parser.add_argument('-n', '--num_batches', type=int, default=10000)
     parser.add_argument('-p', '--model_prefix', type=str, required=True)
     parser.add_argument('-d', '--db', type=str, default='db.json')
+    parser.add_argument('-l', '--loss', type=int, default=50,
+                        help='report loss every x batches')
 
     args = parser.parse_args()
     root = args.root
@@ -41,6 +46,8 @@ if __name__ == '__main__':
     BATCH_SIZE = args.batch_size
     NUM_BATCHES = args.num_batches
     EPOCHS = args.epochs
+    RNN_LAYERS = args.rnn_layers
+    EMB_DIM = args.emb_dim
 
     idxr = Indexer(reserved={0: 'padding', 1: 'OOV'})
     train = Corpus(os.path.join(root, 'train'))
@@ -59,14 +66,23 @@ if __name__ == '__main__':
     X_dev, y_dev = build_set(dev, idxr)
 
     print("Compiling model")
-    model = lstms.bilstm(idxr.vocab_len(), metrics=['accuracy'])
+    if args.model == 'bilstm':
+        params = {'rnn_layers': RNN_LAYERS}
+        model = lstms.bilstm(idxr.vocab_len(), rnn_layers=RNN_LAYERS,
+                             metrics=['accuracy'])
+    elif args.model == 'emb_bilstm':
+        params = {'rnn_layers': RNN_LAYERS, 'emb_dim': EMB_DIM}
+        model = lstms.emb_bilstm(idxr.vocab_len(), EMB_DIM, rnn_layers=RNN_LAYERS,
+                                 metrics=['accuracy'])
+    else:
+        raise ValueError("Missing model [%s]" % args.model)
 
     # experiment dbxs
     tags = ('lstm', 'seq')
     exp_id = getsourcefile(lambda: 0)
-    params = {'batch_size': BATCH_SIZE, 'num_batches': NUM_BATCHES}
+    params.update({'batch_size': BATCH_SIZE, 'num_batches': NUM_BATCHES})
     model_db = Experiment.use(args.db, root, tags=tags, exp_id=exp_id) \
-                         .model("bilstm", model.get_config())
+                         .model(args.model, model.get_config())
 
     print("Starting training")
     with model_db.session(params) as session:
@@ -82,7 +98,7 @@ if __name__ == '__main__':
                 y = to_categorical(y, nb_classes=idxr.vocab_len())
                 loss, _ = model.train_on_batch(X, y)
                 losses.append(loss)
-                if b % 150 == 0:
+                if b % args.loss == 0:
                     dev_loss, dev_acc = model.test_on_batch(X_dev, y_dev)
                     print(BATCH_MSG % (e, np.mean(losses), dev_loss, dev_acc))
             session.add_epoch(e, {'training_loss': np.mean(losses),
