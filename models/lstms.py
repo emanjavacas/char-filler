@@ -38,7 +38,8 @@ def bilstm(n_chars, context=10, hidden_layer=128, rnn_layers=1, **kwargs):
 
 def emb_bilstm(n_chars, emb_dim,
                context=10, hidden_layer=128, rnn_layers=1, **kwargs):
-    emb_layer = Embedding(input_dim=context * 2, output_dim=emb_dim)
+    in_layer = Input(shape=(context * 2,), dtype='int32')
+    emb_layer = Embedding(input_dim=context * 2, output_dim=emb_dim)(in_layer)
     lstm = None
     for i in range(rnn_layers):
         if i == 0:
@@ -47,7 +48,7 @@ def emb_bilstm(n_chars, emb_dim,
             curr_input = lstm
         l2r = LSTM(output_dim=hidden_layer, return_sequences=True)(curr_input)
         r2l = LSTM(output_dim=hidden_layer,
-                   return_sequences=False,
+                   return_sequences=True,
                    go_backwards=True)(curr_input)
         lstm = merge([l2r, r2l], mode='sum', name='bilstm_%d' % i)
     flattened = Flatten()(lstm)

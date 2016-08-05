@@ -72,8 +72,8 @@ if __name__ == '__main__':
                              metrics=['accuracy'])
     elif args.model == 'emb_bilstm':
         params = {'rnn_layers': RNN_LAYERS, 'emb_dim': EMB_DIM}
-        model = lstms.emb_bilstm(idxr.vocab_len(), EMB_DIM, rnn_layers=RNN_LAYERS,
-                                 metrics=['accuracy'])
+        model = lstms.emb_bilstm(idxr.vocab_len(), EMB_DIM,
+                                 rnn_layers=RNN_LAYERS, metrics=['accuracy'])
     else:
         raise ValueError("Missing model [%s]" % args.model)
 
