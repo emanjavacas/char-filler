@@ -101,12 +101,12 @@ if __name__ == '__main__':
                 if b % args.loss == 0:
                     dev_loss, dev_acc = model.test_on_batch(X_dev, y_dev)
                     print(BATCH_MSG % (e, np.mean(losses), dev_loss, dev_acc))
-            session.add_epoch(e, {'training_loss': np.mean(losses),
-                                  'dev_loss': dev_loss,
-                                  'dev_acc': dev_acc})
+            session.add_epoch(e, {'training_loss': str(np.mean(losses)),
+                                  'dev_loss': str(dev_loss),
+                                  'dev_acc': str(dev_acc)})
         _, test_acc = model.test_on_batch(X_test, y_test)
         print("Test acc: %.4f" % test_acc)
-        session.add_result({'test_acc': test_acc})
+        session.add_result({'test_acc': str(test_acc)})
         session.add_meta({'run_time': time() - start,
                           'model_prefix': args.model_prefix})
 
