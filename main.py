@@ -81,8 +81,8 @@ if __name__ == '__main__':
     tags = ('lstm', 'seq')
     exp_id = getsourcefile(lambda: 0)
     params.update({'batch_size': BATCH_SIZE, 'num_batches': NUM_BATCHES})
-    model_db = Experiment.use(args.db, root, tags=tags, exp_id=exp_id) \
-                         .model(args.model, model.get_config())
+    model_db = Experiment.use(args.db, root,
+                              tags=tags, exp_id=exp_id).model(args.model)
 
     print("Starting training")
     with model_db.session(params) as session:
