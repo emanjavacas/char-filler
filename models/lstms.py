@@ -38,8 +38,9 @@ def bilstm(n_chars, context=10, hidden_layer=128, rnn_layers=1, **kwargs):
 
 def emb_bilstm(n_chars, emb_dim,
                context=10, hidden_layer=128, rnn_layers=1, **kwargs):
-    in_layer = Input(shape=(context * 2,), dtype='int32')
-    emb_layer = Embedding(input_dim=context * 2, output_dim=emb_dim)(in_layer)
+    in_layer = Input(shape=(context * 2,), dtype='int32', name='input')
+    emb_layer = Embedding(
+        input_dim=context * 2, output_dim=emb_dim, name='emb')(in_layer)
     lstm = None
     for i in range(rnn_layers):
         if i == 0:
