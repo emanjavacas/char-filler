@@ -23,13 +23,12 @@ def bilstm(n_chars, context=10, hidden_layer=128, rnn_layers=1, **kwargs):
             curr_input = in_layer
         else:
             curr_input = lstm
-        l2r = LSTM(output_dim=hidden_layer, return_sequences=True)(curr_input)
-        r2l = LSTM(output_dim=hidden_layer,
-                   return_sequences=True,
-                   go_backwards=True)(curr_input)
+        l2r = LSTM(hidden_layer, return_sequences=True,
+                   dropout_W=0.2, dropout_U=0.2)(curr_input)
+        r2l = LSTM(hidden_layer, return_sequences=True, go_backwards=True,
+                   dropout_W=0.2, dropout_U=0.2)(curr_input)
         lstm = merge([l2r, r2l], mode='sum', name='bilstm_%d' % i)
-    flattened = Flatten()(lstm)
-    hidden = Dense(n_chars, activation='tanh')(flattened)
+    hidden = Dense(hidden_layer, activation='tanh')(Flatten()(lstm))
     out_layer = Dense(n_chars, activation='softmax')(hidden)
     model = Model(input=in_layer, output=out_layer)
     model.compile('rmsprop', loss='categorical_crossentropy', **kwargs)
@@ -38,23 +37,24 @@ def bilstm(n_chars, context=10, hidden_layer=128, rnn_layers=1, **kwargs):
 
 def emb_bilstm(n_chars, emb_dim,
                context=10, hidden_layer=128, rnn_layers=1, **kwargs):
-    in_layer = Input(shape=(context * 2,), dtype='int32', name='input')
+    in_shape = context * 2
+    in_layer = Input(shape=(in_shape,), dtype='int32', name='input')
     emb_layer = Embedding(
-        input_dim=context * 2, output_dim=emb_dim, name='emb')(in_layer)
+        input_dim=n_chars, output_dim=emb_dim, input_dtype='int32',
+        name='emb')(in_layer)
     lstm = None
     for i in range(rnn_layers):
         if i == 0:
             curr_input = emb_layer
         else:
             curr_input = lstm
-        l2r = LSTM(output_dim=hidden_layer, return_sequences=True)(curr_input)
-        r2l = LSTM(output_dim=hidden_layer,
-                   return_sequences=True,
-                   go_backwards=True)(curr_input)
+        l2r = LSTM(hidden_layer, return_sequences=True,
+                   dropout_W=0.2, dropout_U=0.2)(curr_input)
+        r2l = LSTM(hidden_layer, return_sequences=True, go_backwards=True,
+                   dropout_W=0.2, dropout_U=0.2)(curr_input)
         lstm = merge([l2r, r2l], mode='sum', name='bilstm_%d' % i)
-    flattened = Flatten()(lstm)
-    hidden = Dense(n_chars, activation='tanh')(flattened)
+    hidden = Dense(hidden_layer, activation='tanh')(Flatten()(lstm))
     out_layer = Dense(n_chars, activation='softmax')(hidden)
-    model = Model(input=emb_layer, output=out_layer)
+    model = Model(input=in_layer, output=out_layer)
     model.compile('rmsprop', loss='categorical_crossentropy', **kwargs)
     return model
