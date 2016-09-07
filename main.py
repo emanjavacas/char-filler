@@ -15,12 +15,17 @@ from canister.experiment import Experiment
 BATCH_MSG = "Epoch: %d, Loss: %.4f, Dev-loss: %.4f: Dev-acc: %.4f"
 
 
-def build_set(corpus, idxr, size=2000, enlarge_seqs=True):
+def one_hot(m, nb_classes):
+    "transformas a matrix into a one-hot encoded binary 3D tensor"
+    if isinstance(m, (list, tuple)):
+        m = np.asarray(m)
+    return (np.arange(nb_classes) == m[:, :, None]-1).astype(int)
+
+
+def build_set(corpus, idxr, size=2000):
     dataset = take(corpus.generate(idxr, oov_idx=1), size)
     X, y = list(zip(*dataset))
-    X = np.asarray(X)
-    if enlarge_seqs is True:
-        X = X.reshape(X.shape + (1,))
+    X = one_hot(X, idxr.vocab_len())
     y = to_categorical(y, nb_classes=idxr.vocab_len())
     return X, y
 
@@ -32,12 +37,12 @@ if __name__ == '__main__':
     parser.add_argument('-m', '--emb_dim', type=int, default=50)
     parser.add_argument('-r', '--root', type=str, required=True)
     parser.add_argument('-e', '--epochs', type=int, default=10)
-    parser.add_argument('-b', '--batch_size', type=int, default=128)
+    parser.add_argument('-b', '--batch_size', type=int, default=50)
     parser.add_argument('-n', '--num_batches', type=int, default=10000)
     parser.add_argument('-p', '--model_prefix', type=str, required=True)
     parser.add_argument('-d', '--db', type=str, default='db.json')
     parser.add_argument('-l', '--loss', type=int, default=50,
-                        help='report loss every x batches')
+                        help='report loss every l batches')
 
     args = parser.parse_args()
     root = args.root
@@ -61,11 +66,11 @@ if __name__ == '__main__':
     del corpus
 
     print("Encoding test set")
-    enlarge_seqs = args.model != "emb_bilstm"
-    X_test, y_test = build_set(test, idxr, enlarge_seqs=enlarge_seqs)
+    has_emb = args.model != "emb_bilstm"
+    X_test, y_test = build_set(test, idxr)
 
     print("Encoding dev set")
-    X_dev, y_dev = build_set(dev, idxr, enlarge_seqs=enlarge_seqs)
+    X_dev, y_dev = build_set(dev, idxr)
 
     print("Compiling model")
     if args.model == 'bilstm':
@@ -83,11 +88,14 @@ if __name__ == '__main__':
 
     # experiment db
     tags = ('lstm', 'seq')
-    params.update({'batch_size': BATCH_SIZE, 'num_batches': NUM_BATCHES})
     db = Experiment.use(path, tags=tags, exp_id="char-fill").model(args.model)
 
+    params.update({'batch_size': BATCH_SIZE, 'num_batches': NUM_BATCHES})
+    if has_emb:
+        params.update({'emb_dim': EMB_DIM})
+
     print("Starting training")
-    with db.session(params) as session:
+    with db.session(params, ensure_unique=False) as session:
         from time import time
         start = time()
         for e in range(EPOCHS):
@@ -96,9 +104,7 @@ if __name__ == '__main__':
                 train.generate_batches(idxr, batch_size=BATCH_SIZE, oov_idx=1),
                 NUM_BATCHES)
             for b, (X, y) in enumerate(batches):
-                X = np.asarray(X, dtype='float32')
-                if args.model != "emb_bilstm":
-                    X = X.reshape((BATCH_SIZE, -1, 1))
+                X = one_hot(X, nb_classes=idxr.vocab_len())
                 y = to_categorical(y, nb_classes=idxr.vocab_len())
                 loss, _ = model.train_on_batch(X, y)
                 losses.append(loss)
