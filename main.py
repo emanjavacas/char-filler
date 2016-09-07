@@ -22,10 +22,12 @@ def one_hot(m, nb_classes):
     return (np.arange(nb_classes) == m[:, :, None]-1).astype(int)
 
 
-def build_set(corpus, idxr, size=2000):
+def build_set(corpus, idxr, size=2000, one_hot_enc=True):
     dataset = take(corpus.generate(idxr, oov_idx=1), size)
     X, y = list(zip(*dataset))
-    X = one_hot(X, idxr.vocab_len())
+    X = np.asarray(X)
+    if one_hot_enc:
+        X = one_hot(X, idxr.vocab_len())
     y = to_categorical(y, nb_classes=idxr.vocab_len())
     return X, y
 
@@ -63,27 +65,27 @@ if __name__ == '__main__':
     print("Building encoder on train corpus")
     corpus = list(train.chars())
     idxr.encode_seq(corpus)  # quick pass to fit vocab
+    n_chars = idxr.vocab_len()
     del corpus
 
     print("Encoding test set")
-    has_emb = args.model != "emb_bilstm"
-    X_test, y_test = build_set(test, idxr)
+    has_emb = args.model == "emb_bilstm"
+    X_test, y_test = build_set(test, idxr, one_hot_enc=not has_emb)
 
     print("Encoding dev set")
-    X_dev, y_dev = build_set(dev, idxr)
+    X_dev, y_dev = build_set(dev, idxr, one_hot_enc=not has_emb)
 
     print("Compiling model")
     if args.model == 'bilstm':
         params = {'rnn_layers': RNN_LAYERS}
-        model = lstms.bilstm(
-            idxr.vocab_len(), rnn_layers=RNN_LAYERS, metrics=['accuracy'])
+        model = lstms.bilstm(n_chars, rnn_layers=RNN_LAYERS)
     elif args.model == 'emb_bilstm':
         params = {'rnn_layers': RNN_LAYERS, 'emb_dim': EMB_DIM}
-        model = lstms.emb_bilstm(
-            idxr.vocab_len(), EMB_DIM, rnn_layers=RNN_LAYERS, metrics=['accuracy'])
+        model = lstms.emb_bilstm(n_chars, EMB_DIM, rnn_layers=RNN_LAYERS)
     else:
         raise ValueError("Missing model [%s]" % args.model)
 
+    model.compile('rmsprop', loss='categorical_crossentropy', metrics=['accuracy'])
     model.summary()
 
     # experiment db
@@ -91,8 +93,6 @@ if __name__ == '__main__':
     db = Experiment.use(path, tags=tags, exp_id="char-fill").model(args.model)
 
     params.update({'batch_size': BATCH_SIZE, 'num_batches': NUM_BATCHES})
-    if has_emb:
-        params.update({'emb_dim': EMB_DIM})
 
     print("Starting training")
     with db.session(params, ensure_unique=False) as session:
@@ -104,8 +104,10 @@ if __name__ == '__main__':
                 train.generate_batches(idxr, batch_size=BATCH_SIZE, oov_idx=1),
                 NUM_BATCHES)
             for b, (X, y) in enumerate(batches):
-                X = one_hot(X, nb_classes=idxr.vocab_len())
-                y = to_categorical(y, nb_classes=idxr.vocab_len())
+                X = np.asarray(X)
+                if not has_emb:
+                    X = one_hot(X, nb_classes=n_chars)
+                y = to_categorical(y, nb_classes=n_chars)
                 loss, _ = model.train_on_batch(X, y)
                 losses.append(loss)
                 if b % args.loss == 0:
@@ -118,8 +120,7 @@ if __name__ == '__main__':
         _, test_acc = model.test_on_batch(X_test, y_test)
         print("Test acc: %.4f" % test_acc)
         session.add_result({'test_acc': str(test_acc)})
-        session.add_meta(
-            {'run_time': time() - start, 'model_prefix': args.model_prefix})
+        session.add_meta({'run_time': time() - start, 'model_prefix': args.model_prefix})
 
     # save model + indexer
     model.save_weights(args.model_prefix + '_weights.h5')
