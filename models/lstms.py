@@ -4,6 +4,7 @@ from keras.models import Model
 from keras.layers import Input, merge, Dense, Flatten
 from keras.layers.recurrent import LSTM
 from keras.layers.embeddings import Embedding
+from keras.layers.wrappers import Bidirectional, TimeDistributed
 
 
 def simple_lstm(n_chars, context=10, hidden_layer=128, **kwargs):
@@ -17,17 +18,14 @@ def simple_lstm(n_chars, context=10, hidden_layer=128, **kwargs):
 
 def bilstm(n_chars, context=10, hidden_layer=128, rnn_layers=1, **kwargs):
     in_layer = Input(shape=(context * 2, 1))
-    lstm = None
     for i in range(rnn_layers):
         if i == 0:
-            curr_input = in_layer
+            lstm = in_layer
         else:
-            curr_input = lstm
-        l2r = LSTM(output_dim=hidden_layer, return_sequences=True)(curr_input)
-        r2l = LSTM(output_dim=hidden_layer,
-                   return_sequences=True,
-                   go_backwards=True)(curr_input)
-        lstm = merge([l2r, r2l], mode='sum', name='bilstm_%d' % i)
+            wrapped = LSTM(
+                output_dim=hidden_layer, activation='tanh',
+                return_sequences=True, name='bistm_%d' % i)
+            lstm = Bidirectional(wrapped, merge_mode='sum')(lstm)
     flattened = Flatten()(lstm)
     hidden = Dense(n_chars, activation='tanh')(flattened)
     out_layer = Dense(n_chars, activation='softmax')(hidden)
@@ -40,20 +38,18 @@ def emb_bilstm(n_chars, emb_dim,
                context=10, hidden_layer=128, rnn_layers=1, **kwargs):
     in_layer = Input(shape=(context * 2,), dtype='int32')
     emb_layer = Embedding(input_dim=context * 2, output_dim=emb_dim)(in_layer)
-    lstm = None
     for i in range(rnn_layers):
         if i == 0:
-            curr_input = emb_layer
+            lstm = emb_layer
         else:
-            curr_input = lstm
-        l2r = LSTM(output_dim=hidden_layer, return_sequences=True)(curr_input)
-        r2l = LSTM(output_dim=hidden_layer,
-                   return_sequences=True,
-                   go_backwards=True)(curr_input)
-        lstm = merge([l2r, r2l], mode='sum', name='bilstm_%d' % i)
-    flattened = Flatten()(lstm)
-    hidden = Dense(n_chars, activation='tanh')(flattened)
-    out_layer = Dense(n_chars, activation='softmax')(hidden)
+            wrapped = LSTM(
+                output_dim=hidden_layer, activation='tanh',
+                return_sequences=True, name='bilstm_%d' % i)
+            lstm = Bidirectional(wrapped, merge_mode='sum')
+    # flattened = Flatten()(lstm)
+    # dense = Dense(n_chars, activation='tanh')(flattened)
+    dense = TimeDistributed(Dense(n_chars), name='dense')(lstm)
+    out_layer = Dense(n_chars, activation='softmax', name='output')(dense)
     model = Model(input=emb_layer, output=out_layer)
     model.compile('rmsprop', loss='categorical_crossentropy', **kwargs)
     return model

@@ -41,6 +41,7 @@ if __name__ == '__main__':
 
     args = parser.parse_args()
     root = args.root
+    path = args.db
     assert os.path.isdir(root), "Root path doesn't exist"
 
     BATCH_SIZE = args.batch_size
@@ -77,15 +78,13 @@ if __name__ == '__main__':
     else:
         raise ValueError("Missing model [%s]" % args.model)
 
-    # experiment dbxs
+    # experiment db
     tags = ('lstm', 'seq')
-    exp_id = getsourcefile(lambda: 0)
     params.update({'batch_size': BATCH_SIZE, 'num_batches': NUM_BATCHES})
-    model_db = Experiment.use(args.db, root,
-                              tags=tags, exp_id=exp_id).model(args.model)
+    db = Experiment.use(path, tags=tags, exp_id="char-fill").model(args.model)
 
     print("Starting training")
-    with model_db.session(params) as session:
+    with db.session(params) as session:
         from time import time
         start = time()
         for e in range(EPOCHS):
@@ -107,8 +106,8 @@ if __name__ == '__main__':
         _, test_acc = model.test_on_batch(X_test, y_test)
         print("Test acc: %.4f" % test_acc)
         session.add_result({'test_acc': str(test_acc)})
-        session.add_meta({'run_time': time() - start,
-                          'model_prefix': args.model_prefix})
+        session.add_meta(
+            {'run_time': time() - start, 'model_prefix': args.model_prefix})
 
     # save model + indexer
     model.save_weights(args.model_prefix + '_weights.h5')
