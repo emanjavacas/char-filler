@@ -1,7 +1,7 @@
 # coding: utf-8
 
 from keras.models import Model
-from keras.layers import Input, merge, Dense, Flatten
+from keras.layers import Input, Dense, Flatten
 from keras.layers.recurrent import LSTM
 from keras.layers.embeddings import Embedding
 from keras.layers.wrappers import Bidirectional, TimeDistributed
@@ -36,8 +36,11 @@ def bilstm(n_chars, context=10, hidden_layer=128, rnn_layers=1, **kwargs):
 
 def emb_bilstm(n_chars, emb_dim,
                context=10, hidden_layer=128, rnn_layers=1, **kwargs):
-    in_layer = Input(shape=(context * 2,), dtype='int32')
-    emb_layer = Embedding(input_dim=context * 2, output_dim=emb_dim)(in_layer)
+    in_shape = context * 2
+    in_layer = Input(shape=(in_shape,), dtype='int32', name='input')
+    emb_layer = Embedding(
+        input_dim=n_chars, output_dim=emb_dim, input_dtype='int32',
+        name='emb')(in_layer)
     for i in range(rnn_layers):
         if i == 0:
             lstm = emb_layer
