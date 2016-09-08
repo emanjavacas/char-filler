@@ -39,7 +39,7 @@ if __name__ == '__main__':
     parser.add_argument('-o', '--optimizer', type=str, default='rmsprop')
     parser.add_argument('-R', '--rnn_layers', type=int, default=1)
     parser.add_argument('-m', '--emb_dim', type=int, default=28)
-    parser.add_argument('-l', '--lstm_dim', type=int, default=128)
+    parser.add_argument('-l', '--lstm_dim', type=int, default=100)
     parser.add_argument('-H', '--hidden_dim', type=int, default=250)
     parser.add_argument('-e', '--epochs', type=int, default=10)
     parser.add_argument('-b', '--batch_size', type=int, default=50)
@@ -115,9 +115,7 @@ if __name__ == '__main__':
                 train.generate_batches(idxr, batch_size=BATCH_SIZE, oov_idx=1),
                 NUM_BATCHES)
             for b, (X, y) in enumerate(batches):
-                X = np.asarray(X)
-                if not has_emb:
-                    X = one_hot(X, nb_classes=n_chars)
+                X = np.asarray(X) if has_emb else one_hot(X, nb_classes=n_chars)
                 y = to_categorical(y, nb_classes=n_chars)
                 loss, _ = model.train_on_batch(X, y)
                 losses.append(loss)
