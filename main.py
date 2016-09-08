@@ -35,15 +35,18 @@ def build_set(corpus, idxr, size=2000, one_hot_enc=True):
 if __name__ == '__main__':
     parser = ArgumentParser()
     parser.add_argument('model', type=str)
-    parser.add_argument('-R', '--rnn_layers', type=int, default=1)
-    parser.add_argument('-m', '--emb_dim', type=int, default=50)
     parser.add_argument('-r', '--root', type=str, required=True)
+    parser.add_argument('-o', '--optimizer', type=str, default='rmsprop')
+    parser.add_argument('-R', '--rnn_layers', type=int, default=1)
+    parser.add_argument('-m', '--emb_dim', type=int, default=28)
+    parser.add_argument('-l', '--lstm_dim', type=int, default=128)
+    parser.add_argument('-H', '--hidden_dim', type=int, default=250)
     parser.add_argument('-e', '--epochs', type=int, default=10)
     parser.add_argument('-b', '--batch_size', type=int, default=50)
     parser.add_argument('-n', '--num_batches', type=int, default=10000)
     parser.add_argument('-p', '--model_prefix', type=str, required=True)
     parser.add_argument('-d', '--db', type=str, default='db.json')
-    parser.add_argument('-l', '--loss', type=int, default=50,
+    parser.add_argument('-L', '--loss', type=int, default=50,
                         help='report loss every l batches')
 
     args = parser.parse_args()
@@ -54,8 +57,11 @@ if __name__ == '__main__':
     BATCH_SIZE = args.batch_size
     NUM_BATCHES = args.num_batches
     EPOCHS = args.epochs
+    OPTIMIZER = args.optimizer
     RNN_LAYERS = args.rnn_layers
     EMB_DIM = args.emb_dim
+    LSTM_DIM = args.lstm_dim
+    HIDDEN_DIM = args.hidden_dim
 
     idxr = Indexer(reserved={0: 'padding', 1: 'OOV'})
     train = Corpus(os.path.join(root, 'train'))
@@ -76,23 +82,28 @@ if __name__ == '__main__':
     X_dev, y_dev = build_set(dev, idxr, one_hot_enc=not has_emb)
 
     print("Compiling model")
+    base_params = {'rnn_layers': RNN_LAYERS, 'lstm_layer': LSTM_DIM,
+                   'hidden_layer': HIDDEN_DIM, 'optimizer': OPTIMIZER,
+                   'batch_size': BATCH_SIZE, 'num_batches': NUM_BATCHES}
     if args.model == 'bilstm':
-        params = {'rnn_layers': RNN_LAYERS}
-        model = lstms.bilstm(n_chars, rnn_layers=RNN_LAYERS)
+        params = base_params
+        model = lstms.bilstm(n_chars,
+                             rnn_layers=RNN_LAYERS, lstm_layer=LSTM_DIM,
+                             hidden_layer=HIDDEN_DIM)
     elif args.model == 'emb_bilstm':
-        params = {'rnn_layers': RNN_LAYERS, 'emb_dim': EMB_DIM}
-        model = lstms.emb_bilstm(n_chars, EMB_DIM, rnn_layers=RNN_LAYERS)
+        params = base_params.update({'emb_dim': EMB_DIM})
+        model = lstms.emb_bilstm(n_chars, EMB_DIM,
+                                 rnn_layers=RNN_LAYERS, lstm_layer=LSTM_DIM,
+                                 hidden_layer=HIDDEN_DIM)
     else:
         raise ValueError("Missing model [%s]" % args.model)
 
-    model.compile('rmsprop', loss='categorical_crossentropy', metrics=['accuracy'])
+    model.compile(OPTIMIZER, loss='categorical_crossentropy', metrics=['accuracy'])
     model.summary()
 
     # experiment db
     tags = ('lstm', 'seq')
     db = Experiment.use(path, tags=tags, exp_id="char-fill").model(args.model)
-
-    params.update({'batch_size': BATCH_SIZE, 'num_batches': NUM_BATCHES})
 
     print("Starting training")
     with db.session(params, ensure_unique=False) as session:
