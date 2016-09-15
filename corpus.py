@@ -4,6 +4,10 @@ import os
 import types
 import pickle as p  # python3
 import json
+import logging
+
+
+LOGGER = logging.getLogger(__name__)
 
 
 def pad(items, maxlen, paditem=0, paddir='left'):
@@ -38,7 +42,7 @@ def indexer_from_dict(d):
 
 
 class Indexer(object):
-    def __init__(self, reserved=None):
+    def __init__(self, reserved=None, verbose=False):
         """
         Parameters:
         -----------
@@ -50,6 +54,7 @@ class Indexer(object):
         --------
         indexer = Indexer(reserved={0: 'padding', 1: 'OOV'})
         """
+        self.level = logging.WARN if verbose else logging.NOTSET
         self.decoder = {}
         self.encoder = {}
         if reserved:
@@ -66,6 +71,9 @@ class Indexer(object):
 
     def vocab_len(self):
         return len(self.encoder)
+
+    def set_verbose(self, verbose=True):
+        self.level = logging.WARN if verbose else logging.NOTSET
 
     def encode(self, s, oov_idx=None):
         """
@@ -84,6 +92,7 @@ class Indexer(object):
         elif oov_idx:
             return oov_idx
         else:
+            LOGGER.log(self.level, "Inserting new item [%s]" % s)
             idx = self._current
             self.encoder[s] = idx
             self.decoder[idx] = s
@@ -91,15 +100,13 @@ class Indexer(object):
             return idx
 
     def decode(self, idx):
-        if idx not in self.decoder and idx not in self._extra:
-            raise ValueError("Cannot found index [%d]" % idx)
         try:
             return self.decoder[idx]
         except KeyError:
             return self._extra[idx]
 
-    def encode_seq(self, seq):
-        return [self.encode(x) for x in seq]
+    def encode_seq(self, seq, **kwargs):
+        return [self.encode(x, **kwargs) for x in seq]
 
     def _to_json(self):
         return {'encoder': self.encoder, 'decoder': self.decoder}
@@ -222,3 +229,17 @@ class Corpus(object):
                     n += 1
             except StopIteration:
                 break
+
+
+if __name__ == '__main__':
+    """test"""
+    idxr = Indexer(verbose=True, reserved={0: 'OOV', 1: 'PAD'})
+    from six import moves
+    url = 'http://www.gutenberg.org/cache/epub/1342/pg1342.txt'
+    text = moves.urllib.request.urlopen(url).read().decode('utf-8')
+    train, test = text[:int(len(text) / 8)], text[int(len(text) / 8):]
+    idxr.encode_seq(train)
+    print("Finished indexing train")
+    print("Vocab: %d" % idxr.vocab_len())
+    idxr.encode_seq(test, oov_idx=1)
+    print(str(idxr.encoder))

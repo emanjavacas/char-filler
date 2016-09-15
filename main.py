@@ -129,7 +129,8 @@ if __name__ == '__main__':
         _, test_acc = model.test_on_batch(X_test, y_test)
         print("Test acc: %.4f" % test_acc)
         session.add_result({'test_acc': str(test_acc)})
-        session.add_meta({'run_time': time() - start, 'model_prefix': args.model_prefix})
+        session.add_meta({'run_time': time() - start,
+                          'model_prefix': args.model_prefix})
 
     # save model + indexer
     model.save_weights(args.model_prefix + '_weights.h5')
