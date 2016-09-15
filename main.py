@@ -82,16 +82,15 @@ if __name__ == '__main__':
     X_dev, y_dev = build_set(dev, idxr, one_hot_enc=not has_emb)
 
     print("Compiling model")
-    base_params = {'rnn_layers': RNN_LAYERS, 'lstm_layer': LSTM_DIM,
+    params = {'rnn_layers': RNN_LAYERS, 'lstm_layer': LSTM_DIM,
                    'hidden_layer': HIDDEN_DIM, 'optimizer': OPTIMIZER,
                    'batch_size': BATCH_SIZE, 'num_batches': NUM_BATCHES}
     if args.model == 'bilstm':
-        params = base_params
         model = lstms.bilstm(n_chars,
                              rnn_layers=RNN_LAYERS, lstm_layer=LSTM_DIM,
                              hidden_layer=HIDDEN_DIM)
     elif args.model == 'emb_bilstm':
-        params = base_params.update({'emb_dim': EMB_DIM})
+        params.update({'emb_dim': EMB_DIM})
         model = lstms.emb_bilstm(n_chars, EMB_DIM,
                                  rnn_layers=RNN_LAYERS, lstm_layer=LSTM_DIM,
                                  hidden_layer=HIDDEN_DIM)
