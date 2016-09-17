@@ -6,20 +6,21 @@ from argparse import ArgumentParser
 import numpy as np
 from keras.utils.np_utils import to_categorical
 
-from models import lstms
 from corpus import Indexer, Corpus
 from utils import take, dump_json
+import lstms
+
 from canister.experiment import Experiment
 
 
 BATCH_MSG = "Epoch: %d, Loss: %.4f, Dev-loss: %.4f: Dev-acc: %.4f"
 
 
-def one_hot(m, nb_classes):
+def one_hot(m, n_classes):
     "transformas a matrix into a one-hot encoded binary 3D tensor"
     if isinstance(m, (list, tuple)):
         m = np.asarray(m)
-    return (np.arange(nb_classes) == m[:, :, None]-1).astype(int)
+    return (np.arange(n_classes) == m[:, :, None]-1).astype(int)
 
 
 def build_set(corpus, idxr, size=2000, one_hot_enc=True):
@@ -83,8 +84,8 @@ if __name__ == '__main__':
 
     print("Compiling model")
     params = {'rnn_layers': RNN_LAYERS, 'lstm_layer': LSTM_DIM,
-                   'hidden_layer': HIDDEN_DIM, 'optimizer': OPTIMIZER,
-                   'batch_size': BATCH_SIZE, 'num_batches': NUM_BATCHES}
+              'hidden_layer': HIDDEN_DIM, 'optimizer': OPTIMIZER,
+              'batch_size': BATCH_SIZE, 'num_batches': NUM_BATCHES}
     if args.model == 'bilstm':
         model = lstms.bilstm(n_chars,
                              rnn_layers=RNN_LAYERS, lstm_layer=LSTM_DIM,
@@ -97,7 +98,9 @@ if __name__ == '__main__':
     else:
         raise ValueError("Missing model [%s]" % args.model)
 
-    model.compile(OPTIMIZER, loss='categorical_crossentropy', metrics=['accuracy'])
+    model.compile(OPTIMIZER,
+                  loss='categorical_crossentropy',
+                  metrics=['accuracy'])
     model.summary()
 
     # experiment db
@@ -114,7 +117,7 @@ if __name__ == '__main__':
                 train.generate_batches(idxr, batch_size=BATCH_SIZE, oov_idx=1),
                 NUM_BATCHES)
             for b, (X, y) in enumerate(batches):
-                X = np.asarray(X) if has_emb else one_hot(X, nb_classes=n_chars)
+                X = np.asarray(X) if has_emb else one_hot(X, n_chars)
                 y = to_categorical(y, nb_classes=n_chars)
                 loss, _ = model.train_on_batch(X, y)
                 losses.append(loss)
