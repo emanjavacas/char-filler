@@ -29,11 +29,13 @@ class UnsmoothedLM(object):
 
     def _random_dist(self):
         assert self.random, "Model hasn't been trained yet"
-        return self.lm[self.random[randint(0, len(self.lm) - 1)]]
+        random_prefix = self.random[randint(0, len(self.lm) - 1)]
+        assert random_prefix in self.lm
+        return self.lm[random_prefix]
 
     def generate_char(self, hist, ensure_char=True):
         dist = self.lm.get(tuple(hist))
-        if dist is None:
+        if len(dist) == 0:
             if ensure_char:  # randomly sample a distribution.
                 dist = self._random_dist()
             else:
@@ -48,12 +50,13 @@ class UnsmoothedLM(object):
     def predict(self, prefix, ensure_pred=True):
         assert len(prefix) == self.order, \
             "prefix must be of lm order [%d]" % self.order
-        dist = self.lm[prefix]
-        if dist is None:
+        if prefix not in self.lm:
             if ensure_pred:
                 dist = self._random_dist()
             else:
                 raise KeyError(str(prefix))
+        else:
+            dist = self.lm[prefix]
         return dist.most_common(1)[0][0]  # return argmax
 
     def generate_text(self, nletters=1000, idxr=None, **kwargs):
