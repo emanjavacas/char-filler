@@ -5,6 +5,7 @@ import types
 import pickle as p  # python3
 import json
 import logging
+from copy import deepcopy
 
 
 LOGGER = logging.getLogger(__name__)
@@ -34,15 +35,9 @@ def lines_from_file(fname):
             yield line
 
 
-def indexer_from_dict(d):
-    indexer = Indexer()
-    indexer.encoder = d['encoder']
-    indexer.decoder = {int(k): v for (k, v) in d['decoder']}
-    return indexer
-
 
 class Indexer(object):
-    def __init__(self, reserved=None, verbose=False):
+    def __init__(self, reserved={0: 'PAD', 1: 'OOV'}, verbose=False):
         """
         Parameters:
         -----------
@@ -52,7 +47,7 @@ class Indexer(object):
 
         Example:
         --------
-        indexer = Indexer(reserved={0: 'padding', 1: 'OOV'})
+        indexer = Indexer(reserved={0: 'PAD', 1: 'OOV'})
         """
         self.level = logging.WARN if verbose else logging.NOTSET
         self.decoder = {}
@@ -61,7 +56,7 @@ class Indexer(object):
             if sorted(reserved) != list(range(len(reserved))):
                 raise ValueError("reserved must start at 0")
             self._current = len(reserved)
-            self._extra = reserved
+            self._extra = deepcopy(reserved)
         else:
             self._current = 0
             self._extra = {}
@@ -128,9 +123,17 @@ class Indexer(object):
                 return p.load(f)
         elif mode == 'json':
             with open(fname, 'r') as f:
-                return indexer_from_dict(json.load(f))
+                return Indexer.from_dict(json.load(f))
         else:
             raise ValueError('Unrecognized mode %s' % mode)
+
+    @classmethod
+    def from_dict(cls, d, **kwargs):
+        idxr = cls(**kwargs)
+        idxr.encoder = d['encoder']
+        idxr.decoder = {int(k): v for (k, v) in d['decoder']}
+        idxr._current = len(idxr.encoder) + len(kwargs.get('reserved', {}))
+        return idxr
 
 
 class Corpus(object):
