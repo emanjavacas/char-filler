@@ -1,7 +1,7 @@
 # coding: utf-8
 
 import os
-import random
+from random import random
 from argparse import ArgumentParser
 
 from sklearn.metrics import accuracy_score

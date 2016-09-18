@@ -34,13 +34,13 @@ class UnsmoothedLM(object):
         return self.lm[random_prefix]
 
     def generate_char(self, hist, ensure_char=True):
-        dist = self.lm.get(tuple(hist))
-        if len(dist) == 0:
+        if tuple(hist) not in self.lm:
             if ensure_char:  # randomly sample a distribution.
                 dist = self._random_dist()
             else:
-                assert tuple(hist) in self.lm, \
-                    "couldn't find hist %s" % str(hist)
+                raise KeyError("couldn't find hist %s" % str(hist))
+        else:
+            dist = self.lm[tuple(hist)]
         x = random()  # simple sampling from distribution
         for char, v in dist.items():
             x -= v
@@ -85,6 +85,7 @@ if __name__ == '__main__':
     args = parser.parse_args()
 
     from six.moves.urllib import request
+    import sys
 
     def read_urls(*urls):
         text = []
@@ -103,7 +104,7 @@ if __name__ == '__main__':
         text = []
         for fl in files:
             if os.path.isfile(fl):
-                with open(fl, mode='r') as f:
+                with open(fl, mode='r', encoding='utf-8') as f:
                     print("Reading [%s]" % fl)
                     text += f.read().split('\n')
             elif os.path.isdir(fl):
@@ -112,14 +113,20 @@ if __name__ == '__main__':
                     if not os.path.isfile(flpath):
                         print("Ignoring [%s]" % flpath)
                         continue
-                    with open(flpath, mode='r') as f:
+                    with open(flpath, mode='r', encoding='utf-8') as f:
                         print("Reading [%s]" % flpath)
                         text += f.read().split('\n')
         return text
 
     print("Fetching texts")
-    text = read_urls(*args.url)
-    text += read_files(*args.file)
+    text = []
+    if args.url:
+        text += read_urls(*args.url)
+    if args.file:
+        text += read_files(*args.file)
+    if not text:
+        print("No input text, exiting...")
+        sys.exit(0)
 
     lines = (line for line in text if line.strip())
     corpus = Corpus(lines, context=args.order, side='left')
@@ -151,5 +158,4 @@ if __name__ == '__main__':
         res = ensure_res(question, validators, msg)
 
     print("bye!")
-    import sys
     sys.exit(0)
