@@ -94,7 +94,8 @@ if __name__ == '__main__':
             try:
                 req = request.Request(url)
                 with request.urlopen(req) as f:
-                    text += f.read().decode('utf-8').split('\r\n')
+                    for line in f.read().decode('utf-8').split('\r\n'):
+                        text += [line + "\n"]
             except ValueError:
                 print("Couldn't download [%s]" % url)
         return text
@@ -106,7 +107,8 @@ if __name__ == '__main__':
             if os.path.isfile(fl):
                 with open(fl, mode='r', encoding='utf-8') as f:
                     print("Reading [%s]" % fl)
-                    text += f.read().split('\n')
+                    for line in f.read().split('\n'):
+                        text += [line + '\n']
             elif os.path.isdir(fl):
                 for ffl in os.listdir(fl):
                     flpath = os.path.join(fl, ffl)
@@ -115,7 +117,8 @@ if __name__ == '__main__':
                         continue
                     with open(flpath, mode='r', encoding='utf-8') as f:
                         print("Reading [%s]" % flpath)
-                        text += f.read().split('\n')
+                        for line in f.read().split('\n'):
+                            text += [line + '\n']
         return text
 
     print("Fetching texts")
