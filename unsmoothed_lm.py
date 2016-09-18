@@ -79,7 +79,7 @@ if __name__ == '__main__':
     import argparse
     parser = argparse.ArgumentParser()
     parser.add_argument('-o', '--order', default=6, type=int)
-    parser.add_argument('-u', '--url', default=[shakespeare], nargs='+')
+    parser.add_argument('-u', '--url', nargs='+')
     parser.add_argument('-f', '--file', nargs='+')
 
     args = parser.parse_args()
