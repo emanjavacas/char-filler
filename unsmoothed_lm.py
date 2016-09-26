@@ -3,7 +3,16 @@
 from collections import defaultdict, Counter
 from random import random, randint
 
-from corpus import Corpus, Indexer
+
+def generate_pairs(lines, order, pad="~"):
+    padding = pad * order
+    for line in lines:
+        line = line.strip().replace(pad, "-")
+        if not line:
+            continue
+        line = padding + line + padding
+        for i in range(len(line) - order):
+            yield line[i: i+order], line[i+order]
 
 
 class UnsmoothedLM(object):
@@ -12,7 +21,7 @@ class UnsmoothedLM(object):
         self.lm = defaultdict(Counter)
         self.random = {}
 
-    def train(self, corpus, **kwargs):
+    def train(self, corpus):
         for hist, target in corpus:
             self.lm[tuple(hist)][target] += 1
 
@@ -25,15 +34,14 @@ class UnsmoothedLM(object):
         idxs = sample(range(len(self.lm)), len(self.lm))
         for hist, counts in self.lm.items():
             self.random[idxs.pop()] = hist  # add random index to lm
-            normalize(counts)
+            normalize(counts)  # inplace modification
 
     def _random_dist(self):
         assert self.random, "Model hasn't been trained yet"
         random_prefix = self.random[randint(0, len(self.lm) - 1)]
-        assert random_prefix in self.lm
         return self.lm[random_prefix]
 
-    def generate_char(self, hist, ensure_char=True):
+    def generate_char(self, hist, ensure_char=False):
         if tuple(hist) not in self.lm:
             if ensure_char:  # randomly sample a distribution.
                 dist = self._random_dist()
@@ -42,12 +50,12 @@ class UnsmoothedLM(object):
         else:
             dist = self.lm[tuple(hist)]
         x = random()  # simple sampling from distribution
-        for char, v in dist.items():
-            x -= v
+        for char, prob in dist.items():
+            x -= prob
             if x <= 0:
                 return char
 
-    def predict(self, prefix, ensure_pred=True):
+    def predict(self, prefix, ensure_pred=False):
         assert len(prefix) == self.order, \
             "prefix must be of lm order [%d]" % self.order
         if prefix not in self.lm:
@@ -59,17 +67,19 @@ class UnsmoothedLM(object):
             dist = self.lm[prefix]
         return dist.most_common(1)[0][0]  # return argmax
 
-    def generate_text(self, nletters=1000, idxr=None, **kwargs):
+    def generate_text(self, nletters=1000, idxr=None, pad="~", **kwargs):
+        assert pad or (idxr and idxr.pad)
         text = []
-        hist = [0] * self.order  # start with a seq of padding
+        hist = [pad or idxr.pad] * self.order  # start with a seq of padding
         for i in range(nletters):
             c = self.generate_char(hist, **kwargs)
             hist = hist[-self.order + 1:] + [c]
             text.append(c)
         if idxr is not None:
-            return "".join([idxr.decode(x) for x in text])
+            out = "".join([idxr.decode(x) for x in text])
         else:
-            return text
+            out = "".join(text)
+        return out.replace((pad or idxr.pad) * self.order, "\n")
 
 
 if __name__ == '__main__':
@@ -131,13 +141,10 @@ if __name__ == '__main__':
         print("No input text, exiting...")
         sys.exit(0)
 
-    lines = (line for line in text if line.strip())
-    corpus = Corpus(lines, context=args.order, side='left')
-    idxr, model = Indexer(), UnsmoothedLM(order=args.order)
+    model = UnsmoothedLM(order=args.order)
 
     print("Training on corpus")
-    model.train(corpus.generate(idxr))
-    del text
+    model.train(generate_pairs(text, order=args.order))
 
     def ensure_res(question, validators, msg, prompt='>>> '):
         print(question)
@@ -155,7 +162,7 @@ if __name__ == '__main__':
     while res != 'n':
         print("------ Generating text -------")
         print("-----------------------------")
-        print(model.generate_text(idxr=idxr, ensure_char=True) + "\n")
+        print(model.generate_text() + "\n")
         print("--- End of Generated text ---")
         print("-----------------------------")
         res = ensure_res(question, validators, msg)

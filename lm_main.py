@@ -5,10 +5,8 @@ from random import random
 from argparse import ArgumentParser
 
 from sklearn.metrics import accuracy_score
-
-from corpus import Indexer, Corpus
-from unsmoothed_lm import UnsmoothedLM
-
+from utils import lines_from_file
+from unsmoothed_lm import UnsmoothedLM, generate_pairs
 from canister.experiment import Experiment
 
 
@@ -27,19 +25,12 @@ if __name__ == '__main__':
     ORDER = args.order
     NUM_LINES = args.num_lines
 
-    idxr = Indexer(reserved={0: 'padding', 1: 'OOV'})
-    train = Corpus(os.path.join(root, 'train'), side='left', context=ORDER)
-    test = Corpus(os.path.join(root, 'test'), side='left', context=ORDER)
-
-    print("Building encoder on train corpus")
-    corpus = list(train.chars())
-    idxr.encode_seq(corpus)  # quick pass to fit vocab
-    n_chars = idxr.vocab_len()
-    del corpus
+    train = generate_pairs(lines_from_file(os.path.join(root, 'train')), order=ORDER)
+    test = generate_pairs(lines_from_file(os.path.join(root, 'test')), order=ORDER)
 
     print("Training language model")
     model = UnsmoothedLM(order=ORDER)
-    model.train(train.generate(idxr, oov_idx=1))
+    model.train(train)
 
     tags = ('lm', 'seq')
     params = {
@@ -48,7 +39,7 @@ if __name__ == '__main__':
     }
     db = Experiment.use(path, tags=tags, exp_id="char-fill").model('lm')
     y_random_true, y_random, y_ignore_true, y_ignore = [], [], [], []
-    for hist, target in test.generate(idxr, oov_idx=1):
+    for hist, target in test:
         # random guess if missing pred
         if random() > 0.005:  # downsample test corpus (1748471 examples)
             continue
@@ -62,10 +53,10 @@ if __name__ == '__main__':
             pass
 
     db.add_result({
-        'y_random_true': [idxr.decode(x) for x in y_random_true],
-        'y_random': [idxr.decode(x) for x in y_random],
-        'y_ignore_true': [idxr.decode(x) for x in y_ignore_true],
-        'y_ignore': [idxr.decode(x) for x in y_ignore],
+        'y_random_true': y_random_true,
+        'y_random': y_random,
+        'y_ignore_true': y_ignore_true,
+        'y_ignore': y_ignore,
         'random_acc': accuracy_score(y_random_true, y_random),
         'ignore_acc': accuracy_score(y_ignore_true, y_ignore)
     }, params=params)

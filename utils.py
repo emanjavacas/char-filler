@@ -1,6 +1,20 @@
 #!/usr/bin/env python
 
 import json
+import os
+
+
+def lines_from_file(f):
+    if os.path.isfile(f):
+        for line in open(f).readlines():
+            yield line
+    elif os.path.isdir(f):
+        for ff in os.listdir(f):
+            for line in lines_from_file(os.path.join(f, ff)):
+                yield line
+    else:  # assume is text
+        for line in f.split('\n'):
+            yield line + '\n'
 
 
 def save_ndarray(ndarray, fname):
