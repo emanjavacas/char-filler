@@ -35,7 +35,7 @@ def lines_from_file(fname):
 
 
 class Indexer(object):
-    def __init__(self, pad='~', oov='-', verbose=False):
+    def __init__(self, pad='~', oov='±', verbose=False):
         """
         Parameters:
         -----------
@@ -167,11 +167,11 @@ class Corpus(object):
             minidx = max(0, idx - self.context)
             maxidx = min(maxlen, idx + self.context + 1)
             if self.side in {'left', 'both'}:
-                left = pad(encoded_line[minidx: idx],
-                           self.context, paddir='left')
+                left = pad(encoded_line[minidx: idx], self.context,
+                           paditem=indexer.pad, paddir='left')
             if self.side in {'right', 'both'}:
-                right = pad(encoded_line[idx + 1: maxidx],
-                            self.context, paddir='right')
+                right = pad(encoded_line[idx + 1: maxidx], self.context,
+                            paditem=indexer.pad, paddir='right')
             if self.side == 'left':
                 yield left, c
             elif self.side == 'right':
@@ -245,7 +245,7 @@ class Corpus(object):
 
 if __name__ == '__main__':
     """test"""
-    idxr = Indexer(verbose=True, reserved={0: 'OOV', 1: 'PAD'})
+    idxr = Indexer(verbose=True)
     from six import moves
     url = 'http://www.gutenberg.org/cache/epub/1342/pg1342.txt'
     text = moves.urllib.request.urlopen(url).read().decode('utf-8')

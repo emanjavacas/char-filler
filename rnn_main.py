@@ -24,7 +24,7 @@ def one_hot(m, n_classes):
 
 
 def build_set(corpus, idxr, size=2000, one_hot_enc=True):
-    dataset = take(corpus.generate(idxr, oov_idx=1), size)
+    dataset = take(corpus.generate(idxr), size)
     X, y = list(zip(*dataset))
     X = np.asarray(X)
     if one_hot_enc:
@@ -64,7 +64,7 @@ if __name__ == '__main__':
     LSTM_DIM = args.lstm_dim
     HIDDEN_DIM = args.hidden_dim
 
-    idxr = Indexer(oov='±')
+    idxr = Indexer(pad='~', oov='±')
     train = Corpus(os.path.join(root, 'train'))
     test = Corpus(os.path.join(root, 'test'))
     dev = Corpus(os.path.join(root, 'dev'))
@@ -114,7 +114,7 @@ if __name__ == '__main__':
         for e in range(EPOCHS):
             losses = []
             batches = take(
-                train.generate_batches(idxr, batch_size=BATCH_SIZE, oov_idx=1),
+                train.generate_batches(idxr, batch_size=BATCH_SIZE),
                 NUM_BATCHES)
             for b, (X, y) in enumerate(batches):
                 X = np.asarray(X) if has_emb else one_hot(X, n_chars)
