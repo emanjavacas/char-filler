@@ -5,7 +5,6 @@ import types
 import pickle as p  # python3
 import json
 import logging
-from copy import deepcopy
 
 
 LOGGER = logging.getLogger(__name__)
@@ -35,9 +34,8 @@ def lines_from_file(fname):
             yield line
 
 
-
 class Indexer(object):
-    def __init__(self, reserved={0: 'PAD', 1: 'OOV'}, verbose=False):
+    def __init__(self, pad='~', oov='-', verbose=False):
         """
         Parameters:
         -----------
@@ -47,19 +45,20 @@ class Indexer(object):
 
         Example:
         --------
-        indexer = Indexer(reserved={0: 'PAD', 1: 'OOV'})
+        indexer = Indexer()
         """
         self.level = logging.WARN if verbose else logging.NOTSET
+        self.pad = pad
+        self.oov = oov
         self.decoder = {}
         self.encoder = {}
-        if reserved:
-            if sorted(reserved) != list(range(len(reserved))):
-                raise ValueError("reserved must start at 0")
-            self._current = len(reserved)
-            self._extra = deepcopy(reserved)
-        else:
-            self._current = 0
-            self._extra = {}
+        self._current = 0
+        if pad:
+            self.encode(pad)
+            self.pad = pad
+        if oov:
+            self.encode(oov)
+            self.oov = oov
 
     def vocab(self):
         return self.encoder.keys()
@@ -70,13 +69,11 @@ class Indexer(object):
     def set_verbose(self, verbose=True):
         self.level = logging.WARN if verbose else logging.NOTSET
 
-    def encode(self, s, oov_idx=None):
+    def encode(self, s):
         """
         Parameters:
         -----------
         s: object, object to index
-        oov_idx: int or None, if None new indices are assigned to previously
-        unseen items (OOVs), if int oov_idx is returned for OOVs
 
         Returns:
         --------
@@ -84,8 +81,8 @@ class Indexer(object):
         """
         if s in self.encoder:
             return self.encoder[s]
-        elif oov_idx:
-            return oov_idx
+        elif self.oov:
+            return self.oov_encode
         else:
             LOGGER.log(self.level, "Inserting new item [%s]" % s)
             idx = self._current
@@ -98,13 +95,21 @@ class Indexer(object):
         try:
             return self.decoder[idx]
         except KeyError:
-            return self._extra[idx]
+            if self.oov:
+                return self.oov_decode
+            else:
+                raise KeyError
 
     def encode_seq(self, seq, **kwargs):
         return [self.encode(x, **kwargs) for x in seq]
 
     def _to_json(self):
-        return {'encoder': self.encoder, 'decoder': self.decoder}
+        obj = {'encoder': self.encoder, 'decoder': self.decoder}
+        if self.pad:
+            obj.update({'pad': self.pad})
+        if self.oov:
+            obj.update({'oov': self.oov})
+        return obj
 
     def save(self, fname, mode='json'):
         if mode == 'json':
@@ -132,7 +137,11 @@ class Indexer(object):
         idxr = cls(**kwargs)
         idxr.encoder = d['encoder']
         idxr.decoder = {int(k): v for (k, v) in d['decoder']}
-        idxr._current = len(idxr.encoder) + len(kwargs.get('reserved', {}))
+        idxr._current = len(idxr.encoder)
+        if 'pad' in d:
+            idxr.pad = d['pad']
+        if 'oov' in d:
+            idxr.oov = d['oov']
         return idxr
 
 
@@ -244,5 +253,5 @@ if __name__ == '__main__':
     idxr.encode_seq(train)
     print("Finished indexing train")
     print("Vocab: %d" % idxr.vocab_len())
-    idxr.encode_seq(test, oov_idx=1)
+    idxr.encode_seq(test)
     print(str(idxr.encoder))

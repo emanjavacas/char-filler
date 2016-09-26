@@ -64,7 +64,7 @@ if __name__ == '__main__':
     LSTM_DIM = args.lstm_dim
     HIDDEN_DIM = args.hidden_dim
 
-    idxr = Indexer(reserved={0: 'padding', 1: 'OOV'})
+    idxr = Indexer(oov='±')
     train = Corpus(os.path.join(root, 'train'))
     test = Corpus(os.path.join(root, 'test'))
     dev = Corpus(os.path.join(root, 'dev'))
