@@ -13,7 +13,7 @@ import lstms
 from canister.experiment import Experiment
 
 
-BATCH_MSG = "Epoch: %d, Loss: %.4f, Dev-loss: %.4f: Dev-acc: %.4f"
+BATCH_MSG = "Epoch: %2d, Batch: %4d, Loss: %.4f, Dev-loss: %.4f: Dev-acc: %.4f"
 
 
 def one_hot(m, n_classes):
@@ -117,19 +117,21 @@ if __name__ == '__main__':
                 train.generate_batches(idxr, batch_size=BATCH_SIZE),
                 NUM_BATCHES)
             for b, (X, y) in enumerate(batches):
+                assert idxr.vocab_len() == n_chars, \
+                    "Vocab_len [%d] != original vocab_len [%d]" % (idxr.vocab_len(), n_chars)
                 X = np.asarray(X) if has_emb else one_hot(X, n_chars)
                 y = to_categorical(y, nb_classes=n_chars)
                 loss, _ = model.train_on_batch(X, y)
                 losses.append(loss)
                 if b % args.loss == 0:
                     dev_loss, dev_acc = model.test_on_batch(X_dev, y_dev)
-                    print(BATCH_MSG % (e, np.mean(losses), dev_loss, dev_acc))
+                    print(BATCH_MSG % (e, b, np.mean(losses), dev_loss, dev_acc), end='\r')
             session.add_epoch(
                 e, {'training_loss': str(np.mean(losses)),
                     'dev_loss': str(dev_loss),
                     'dev_acc': str(dev_acc)})
         _, test_acc = model.test_on_batch(X_test, y_test)
-        print("Test acc: %.4f" % test_acc)
+        print("Test acc: %.4f\n" % test_acc)
         session.add_result({'test_acc': str(test_acc)})
         session.add_meta({'run_time': time() - start,
                           'model_prefix': args.model_prefix})

@@ -54,10 +54,10 @@ class Indexer(object):
         self.encoder = {}
         self._current = 0
         if pad:
-            self.encode(pad)
+            self.pad_code = self.encode(pad)
             self.pad = pad
         if oov:
-            self.encode(oov)
+            self.oov_code = self.encode(oov)
             self.oov = oov
 
     def vocab(self):
@@ -81,8 +81,6 @@ class Indexer(object):
         """
         if s in self.encoder:
             return self.encoder[s]
-        elif self.oov:
-            return self.oov_encode
         else:
             LOGGER.log(self.level, "Inserting new item [%s]" % s)
             idx = self._current
@@ -92,13 +90,7 @@ class Indexer(object):
             return idx
 
     def decode(self, idx):
-        try:
-            return self.decoder[idx]
-        except KeyError:
-            if self.oov:
-                return self.oov_decode
-            else:
-                raise KeyError
+        return self.decoder[idx]
 
     def encode_seq(self, seq, **kwargs):
         return [self.encode(x, **kwargs) for x in seq]
@@ -168,10 +160,10 @@ class Corpus(object):
             maxidx = min(maxlen, idx + self.context + 1)
             if self.side in {'left', 'both'}:
                 left = pad(encoded_line[minidx: idx], self.context,
-                           paditem=indexer.pad, paddir='left')
+                           paditem=indexer.pad_code, paddir='left')
             if self.side in {'right', 'both'}:
                 right = pad(encoded_line[idx + 1: maxidx], self.context,
-                            paditem=indexer.pad, paddir='right')
+                            paditem=indexer.pad_code, paddir='right')
             if self.side == 'left':
                 yield left, c
             elif self.side == 'right':
