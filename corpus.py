@@ -26,6 +26,8 @@ def pad(items, maxlen, paditem=0, paddir='left'):
         return (maxlen - n_items) * [paditem] + items
     if paddir == 'right':
         return items + (maxlen - n_items) * [paditem]
+    else:
+        raise ValueError("Unknown pad direction [%s]" % str(paddir))
 
 
 def lines_from_file(fname):
@@ -69,7 +71,19 @@ class Indexer(object):
     def set_verbose(self, verbose=True):
         self.level = logging.WARN if verbose else logging.NOTSET
 
-    def encode(self, s):
+    def fit(self, seq):
+        self.fitted = True
+        return self.encode_seq(seq, fitted=False)
+
+    def transform(self, seq):
+        if not self.fitted:
+            raise ValueError("Indexer hasn't been fitted yet")
+        return self.encode_seq(seq, fitted=True)
+
+    def fit_transform(self, seq):
+        return self.fit(seq)
+
+    def encode(self, s, fitted=False):
         """
         Parameters:
         -----------
@@ -81,6 +95,11 @@ class Indexer(object):
         """
         if s in self.encoder:
             return self.encoder[s]
+        elif fitted:
+            if self.oov:
+                return self.oov_code
+            else:
+                raise KeyError("Unknown value [%s] with no OOV default" % s)
         else:
             LOGGER.log(self.level, "Inserting new item [%s]" % s)
             idx = self._current
@@ -98,9 +117,9 @@ class Indexer(object):
     def _to_json(self):
         obj = {'encoder': self.encoder, 'decoder': self.decoder}
         if self.pad:
-            obj.update({'pad': self.pad})
+            obj.update({'pad': self.pad, 'pad_code': self.pad_code})
         if self.oov:
-            obj.update({'oov': self.oov})
+            obj.update({'oov': self.oov, 'oov_code': self.oov_code})
         return obj
 
     def save(self, fname, mode='json'):
@@ -128,12 +147,15 @@ class Indexer(object):
     def from_dict(cls, d, **kwargs):
         idxr = cls(**kwargs)
         idxr.encoder = d['encoder']
-        idxr.decoder = {int(k): v for (k, v) in d['decoder']}
+        idxr.decoder = {int(k): v for (k, v) in d['decoder'].items()}
+        idxr.fitted = True
         idxr._current = len(idxr.encoder)
         if 'pad' in d:
             idxr.pad = d['pad']
+            idxr.pad_code = idxr.encode(idxr.pad, fitted=True)
         if 'oov' in d:
             idxr.oov = d['oov']
+            idxr.oov_code = idxr.encode(idxr.oov, fitted=True)
         return idxr
 
 
