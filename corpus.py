@@ -56,11 +56,11 @@ class Indexer(object):
         self.encoder = {}
         self._current = 0
         if pad:
-            self.pad_code = self.encode(pad)
             self.pad = pad
+            self.pad_code = self.encode(pad, fitted=False)
         if oov:
-            self.oov_code = self.encode(oov)
             self.oov = oov
+            self.oov_code = self.encode(oov, fitted=False)
 
     def vocab(self):
         return self.encoder.keys()
