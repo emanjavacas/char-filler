@@ -83,7 +83,7 @@ class Indexer(object):
     def fit_transform(self, seq):
         return self.fit(seq)
 
-    def encode(self, s, fitted=False):
+    def encode(self, s, fitted=True):
         """
         Parameters:
         -----------

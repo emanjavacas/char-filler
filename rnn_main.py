@@ -14,6 +14,7 @@ from canister.experiment import Experiment
 
 
 BATCH_MSG = "Epoch: %2d, Batch: %4d, Loss: %.4f, Dev-loss: %.4f: Dev-acc: %.4f"
+BATCH_MSG = "\nEpoch: %2d, Loss: %.4f, Dev-loss: %.4f: Dev-acc: %.4f\n"
 
 
 def one_hot(m, n_classes):
@@ -24,7 +25,7 @@ def one_hot(m, n_classes):
 
 
 def build_set(corpus, idxr, size=2000, one_hot_enc=True):
-    dataset = take(corpus.generate(idxr), size)
+    dataset = take(corpus.generate(idxr, fitted=True), size)
     X, y = list(zip(*dataset))
     X = np.asarray(X)
     if one_hot_enc:
@@ -70,10 +71,8 @@ if __name__ == '__main__':
     dev = Corpus(os.path.join(root, 'dev'))
 
     print("Building encoder on train corpus")
-    corpus = list(train.chars())
-    idxr.encode_seq(corpus)  # quick pass to fit vocab
+    idxr.fit(train.chars())  # quick pass to fit vocab
     n_chars = idxr.vocab_len()
-    del corpus
 
     print("Encoding test set")
     has_emb = args.model == "emb_bilstm"
@@ -117,8 +116,6 @@ if __name__ == '__main__':
                 train.generate_batches(idxr, batch_size=BATCH_SIZE),
                 NUM_BATCHES)
             for b, (X, y) in enumerate(batches):
-                assert idxr.vocab_len() == n_chars, \
-                    "Vocab_len [%d] != original vocab_len [%d]" % (idxr.vocab_len(), n_chars)
                 X = np.asarray(X) if has_emb else one_hot(X, n_chars)
                 y = to_categorical(y, nb_classes=n_chars)
                 loss, _ = model.train_on_batch(X, y)
@@ -126,6 +123,7 @@ if __name__ == '__main__':
                 if b % args.loss == 0:
                     dev_loss, dev_acc = model.test_on_batch(X_dev, y_dev)
                     print(BATCH_MSG % (e, b, np.mean(losses), dev_loss, dev_acc), end='\r')
+            print(EPOCH_MSG % (e, np.mean(losses), dev_loss, dev_acc))
             session.add_epoch(
                 e, {'training_loss': str(np.mean(losses)),
                     'dev_loss': str(dev_loss),
