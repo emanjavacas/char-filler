@@ -68,4 +68,4 @@ def fill():
     return render_template(text=text, output=output)
 
 if __name__ == '__main__':
-    run(host='localhost', port=8083)
+    run(host='0.0.0.0', port=8083)
