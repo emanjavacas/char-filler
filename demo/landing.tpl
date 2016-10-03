@@ -10,8 +10,8 @@
     <h1>CharFiller!</h1>
     <p>Add a text to be filled (mark characters to be filled with underscores)</p>
     <form action="/fill" method="POST">
-      <input type="text" size="200" maxlength="200" name="text"
-             placeholder="This is a sample _ext to be filled"></input>
+      <textarea type="text" name="text" cols="100" rows="20"
+		placeholder="This is a sample _ext to be filled"></textarea>
       <input type="submit" name="save" value="save"></input>
     </form>
     <hr>
