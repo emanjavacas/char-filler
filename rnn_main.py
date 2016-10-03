@@ -37,18 +37,19 @@ def build_set(corpus, idxr, size=2000, one_hot_enc=True):
 if __name__ == '__main__':
     parser = ArgumentParser()
     parser.add_argument('model', type=str)
-    parser.add_argument('-r', '--root', type=str, required=True)
     parser.add_argument('-o', '--optimizer', type=str, default='rmsprop')
     parser.add_argument('-R', '--rnn_layers', type=int, default=1)
     parser.add_argument('-m', '--emb_dim', type=int, default=28)
     parser.add_argument('-l', '--lstm_dim', type=int, default=100)
     parser.add_argument('-H', '--hidden_dim', type=int, default=250)
-    parser.add_argument('-e', '--epochs', type=int, default=10)
+    parser.add_argument('-D', '--dropout', type=float, default=0.0)
     parser.add_argument('-b', '--batch_size', type=int, default=50)
+    parser.add_argument('-e', '--epochs', type=int, default=10)
     parser.add_argument('-n', '--num_batches', type=int, default=10000)
+    parser.add_argument('-r', '--root', type=str, required=True)
     parser.add_argument('-p', '--model_prefix', type=str, required=True)
     parser.add_argument('-d', '--db', type=str, default='db.json')
-    parser.add_argument('-L', '--loss', type=int, default=50,
+    parser.add_argument('-L', '--loss', type=int, default=1,
                         help='report loss every l batches')
 
     args = parser.parse_args()
@@ -64,6 +65,7 @@ if __name__ == '__main__':
     EMB_DIM = args.emb_dim
     LSTM_DIM = args.lstm_dim
     HIDDEN_DIM = args.hidden_dim
+    DROPOUT = args.dropout
 
     idxr = Indexer(pad='~', oov='±')
     train = Corpus(os.path.join(root, 'train'))
@@ -86,20 +88,20 @@ if __name__ == '__main__':
               'hidden_layer': HIDDEN_DIM, 'optimizer': OPTIMIZER,
               'batch_size': BATCH_SIZE, 'num_batches': NUM_BATCHES}
     if args.model == 'bilstm':
-        model = lstms.bilstm(n_chars,
-                             rnn_layers=RNN_LAYERS, lstm_layer=LSTM_DIM,
-                             hidden_layer=HIDDEN_DIM)
+        model = lstms.bilstm(
+            n_chars,
+            rnn_layers=RNN_LAYERS, lstm_layer=LSTM_DIM,
+            hidden_layer=HIDDEN_DIM, dropout=DROPOUT)
     elif args.model == 'emb_bilstm':
         params.update({'emb_dim': EMB_DIM})
-        model = lstms.emb_bilstm(n_chars, EMB_DIM,
-                                 rnn_layers=RNN_LAYERS, lstm_layer=LSTM_DIM,
-                                 hidden_layer=HIDDEN_DIM)
+        model = lstms.emb_bilstm(
+            n_chars, EMB_DIM,
+            rnn_layers=RNN_LAYERS, lstm_layer=LSTM_DIM,
+            hidden_layer=HIDDEN_DIM, dropout=DROPOUT)
     else:
         raise ValueError("Missing model [%s]" % args.model)
 
-    model.compile(OPTIMIZER,
-                  loss='categorical_crossentropy',
-                  metrics=['accuracy'])
+    model.compile(OPTIMIZER, loss='categorical_crossentropy', metrics=['accuracy'])
     model.summary()
 
     # experiment db
@@ -113,8 +115,7 @@ if __name__ == '__main__':
         for e in range(EPOCHS):
             losses = []
             batches = take(
-                train.generate_batches(idxr, batch_size=BATCH_SIZE),
-                NUM_BATCHES)
+                train.generate_batches(idxr, batch_size=BATCH_SIZE), NUM_BATCHES)
             for b, (X, y) in enumerate(batches):
                 X = np.asarray(X) if has_emb else one_hot(X, n_chars)
                 y = to_categorical(y, nb_classes=n_chars)
