@@ -10,7 +10,7 @@ from corpus import Indexer, Corpus
 from utils import take, dump_json
 import lstms
 
-from canister.experiment import Experiment
+from casket import Experiment as E
 
 
 BATCH_MSG = "Epoch: %2d, Batch: %4d, Loss: %.4f, Dev-loss: %.4f: Dev-acc: %.4f"
@@ -90,14 +90,14 @@ if __name__ == '__main__':
     if args.model == 'bilstm':
         model = lstms.bilstm(
             n_chars,
-            rnn_layers=RNN_LAYERS, lstm_layer=LSTM_DIM,
-            hidden_layer=HIDDEN_DIM, dropout=DROPOUT)
+            rnn_layers=RNN_LAYERS, lstm_dims=LSTM_DIM,
+            hidden_dim=HIDDEN_DIM, dropout=DROPOUT)
     elif args.model == 'emb_bilstm':
         params.update({'emb_dim': EMB_DIM})
         model = lstms.emb_bilstm(
             n_chars, EMB_DIM,
-            rnn_layers=RNN_LAYERS, lstm_layer=LSTM_DIM,
-            hidden_layer=HIDDEN_DIM, dropout=DROPOUT)
+            rnn_layers=RNN_LAYERS, lstm_dims=LSTM_DIM,
+            hidden_dim=HIDDEN_DIM, dropout=DROPOUT)
     else:
         raise ValueError("Missing model [%s]" % args.model)
 
@@ -106,7 +106,7 @@ if __name__ == '__main__':
 
     # experiment db
     tags = ('lstm', 'seq')
-    db = Experiment.use(path, tags=tags, exp_id="char-fill").model(args.model)
+    db = E.use(path, tags=tags, exp_id="char-fill").model(args.model)
 
     print("Starting training")
     with db.session(params, ensure_unique=False) as session:
