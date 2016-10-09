@@ -32,15 +32,6 @@ def load_json(fname):
         return json.load(f)
 
 
-def take(g, n):
-    index = 0
-    for x in g:
-        if index >= n:
-            break
-        yield x
-        index += 1
-
-
 if __name__ == '__main__':
     from argparse import ArgumentParser
     import numpy as np

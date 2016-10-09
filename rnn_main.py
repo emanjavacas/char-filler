@@ -1,13 +1,13 @@
 # coding: utf-8
 
 import os
-from argparse import ArgumentParser
+import itertools
 
 import numpy as np
 from keras.utils.np_utils import to_categorical
 
 from corpus import Indexer, Corpus
-from utils import take, dump_json
+from utils import dump_json
 import lstms
 
 from casket import Experiment as E
@@ -17,15 +17,23 @@ BATCH_MSG = "Epoch: %2d, Batch: %4d, Loss: %.4f, Dev-loss: %.4f: Dev-acc: %.4f"
 EPOCH_MSG = "\nEpoch: %2d, Loss: %.4f, Dev-loss: %.4f: Dev-acc: %.4f\n"
 
 
+def log_batch(epoch, batch, train_loss, dev_loss, dev_acc):
+    print(BATCH_MSG % (epoch, batch, train_loss, dev_loss, dev_acc), end='\r')
+
+
+def log_epoch(epoch, train_loss, dev_loss):
+    print(EPOCH_MSG % (epoch, train_loss, dev_loss, dev_acc))
+
+
 def one_hot(m, n_classes):
-    "transformas a matrix into a one-hot encoded binary 3D tensor"
+    "transforms a matrix into a one-hot encoded binary 3D tensor"
     if isinstance(m, (list, tuple)):
         m = np.asarray(m)
     return (np.arange(n_classes) == m[:, :, None]-1).astype(int)
 
 
 def build_set(corpus, idxr, size=2000, one_hot_enc=True):
-    dataset = take(corpus.generate(idxr, fitted=True), size)
+    dataset = itertools.islice(corpus.generate(idxr, fitted=True), size)
     X, y = list(zip(*dataset))
     X = np.asarray(X)
     if one_hot_enc:
@@ -35,6 +43,7 @@ def build_set(corpus, idxr, size=2000, one_hot_enc=True):
 
 
 if __name__ == '__main__':
+    from argparse import ArgumentParser
     parser = ArgumentParser()
     parser.add_argument('model', type=str)
     parser.add_argument('-o', '--optimizer', type=str, default='rmsprop')
@@ -114,8 +123,9 @@ if __name__ == '__main__':
         start = time()
         for e in range(EPOCHS):
             losses = []
-            batches = take(
-                train.generate_batches(idxr, batch_size=BATCH_SIZE), NUM_BATCHES)
+            batches = itertools.islice(
+                train.generate_batches(idxr, batch_size=BATCH_SIZE),
+                NUM_BATCHES)
             for b, (X, y) in enumerate(batches):
                 X = np.asarray(X) if has_emb else one_hot(X, n_chars)
                 y = to_categorical(y, nb_classes=n_chars)
@@ -123,8 +133,8 @@ if __name__ == '__main__':
                 losses.append(loss)
                 if b % args.loss == 0:
                     dev_loss, dev_acc = model.test_on_batch(X_dev, y_dev)
-                    print(BATCH_MSG % (e, b, np.mean(losses), dev_loss, dev_acc), end='\r')
-            print(EPOCH_MSG % (e, np.mean(losses), dev_loss, dev_acc))
+                    log_batch(e, b, np.mean(losses), dev_loss, dev_acc)
+            log_epoch(e, np.mean(losses), dev_loss, dev_acc)
             session.add_epoch(
                 e, {'training_loss': str(np.mean(losses)),
                     'dev_loss': str(dev_loss),
