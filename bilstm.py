@@ -52,7 +52,8 @@ class BILSTM(object):
             [left_in.input_var, right_in.input_var],
             network_output)
 
-    def train_on_batch(self, batch_left, batch_right, batch_y, lr=0.01):
+    def train_on_batch(self, batch_left, batch_right, batch_y,
+                       lr=0.01, shuffle=False):
         """
         Parameters:
         -----------
@@ -61,19 +62,32 @@ class BILSTM(object):
         batch_y: np.array(size=(batch_size, vocab_size))
         """
         assert batch_left.shape[0] == batch_right.shape[0] == batch_y.shape[0]
-        p = np.random.permutation(batch_left.shape[0])
-        return self._train(batch_left[p, :], batch_right[p, :], batch_y[p])
+        if shuffle:
+            p = np.random.permutation(batch_left.shape[0])
+            return self._train(batch_left[p, :], batch_right[p, :], batch_y[p])
+        else:
+            return self._train(batch_left, batch_right, batch_y)
 
     def fit(self):
         pass
 
-    def predict(self, left_in, right_in):
+    def predict(self, left_in, right_in, max_n=False, return_probs=False):
         """
         probably needs embedding in a batch matrix of length 1 if
         left_in and right_in are integer vectors.
         """
         out = self._predict(left_in, right_in)
-        return np.argmax(out)
+        if max_n:
+            idx = np.argsort(out)
+            if return_probs:
+                return idx[:max_n], out[idx[:max_n]]
+            else:
+                return idx[:max_n]
+        else:
+            if return_probs:
+                return np.argmax(out), out[np.argmax(out)]
+            else:
+                return np.argmax(out)
 
     def save(self):
         pass
