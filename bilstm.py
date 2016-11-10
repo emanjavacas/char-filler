@@ -25,39 +25,43 @@ def bilstm_layer(input_left, input_right, lstm_dim, n_layers=1):
     return ElemwiseSumLayer([dense_left, dense_right])
 
 
-class BILSTM(object):
-    def __init__(self, emb_dim, lstm_dim, vocab_size):
+class BiLSTM(object):
+    def __init__(self, emb_dim, lstm_dim, vocab_size, n_layers=1):
         self.emb_dim = emb_dim
         self.lstm_dim = lstm_dim
         self.vocab_size = vocab_size
 
         # Input is integer matrices (batch_size, seq_length)
-        left_in = InputLayer(shape=(None, None))
-        right_in = InputLayer(shape=(None, None))
-        self.emb_W = np.random.uniform(size=(vocab_size, emb_dim))
+        left_in = InputLayer(shape=(None, None), input_var=T.imatrix())
+        right_in = InputLayer(shape=(None, None), input_var=T.imatrix())
+        self.emb_W = np.random.uniform(size=(vocab_size, emb_dim)).astype(np.float32)
         emb_left = EmbeddingLayer(
             left_in, input_size=vocab_size, output_size=emb_dim, W=self.emb_W)
         emb_right = EmbeddingLayer(
-            left_in, input_size=vocab_size, output_size=emb_dim, W=self.emb_W)
-        merged = bilstm_layer(emb_left, emb_right, lstm_dim)
+            right_in, input_size=vocab_size, output_size=emb_dim, W=self.emb_W)
+        merged = bilstm_layer(emb_left, emb_right, lstm_dim, n_layers=n_layers)
         output = DenseLayer(merged, num_units=vocab_size, nonlinearity=softmax)
 
         # T.nnet.categorical_crossentropy allows to represent true distribution
         # as an integer vector (implicitely casting to a one-hot matrix)
-        lr, targets = T.fscalar('lr'), T.vector('targets')
+        lr, targets = T.fscalar('lr'), T.ivector('targets')
         network_output = get_output(output)
         cost = T.nnet.categorical_crossentropy(network_output, targets).mean()
         params = get_all_params(output, trainable=True)
         updates = lasagne.updates.adagrad(cost, params, lr)
 
+        print("Compiling training function")
         self._train = theano.function(
             [left_in.input_var, right_in.input_var, targets, lr],
             cost,
-            updates=updates)
+            updates=updates,
+            allow_input_downcast=True)
 
+        print("Compiling predict function")
         self._predict = theano.function(
             [left_in.input_var, right_in.input_var],
-            network_output)
+            network_output,
+            allow_input_downcast=True)
 
     def train_on_batch(self, batch_left, batch_right, batch_y,
                        lr=0.01, shuffle=False):
@@ -71,9 +75,9 @@ class BILSTM(object):
         assert batch_left.shape[0] == batch_right.shape[0] == batch_y.shape[0]
         if shuffle:
             p = np.random.permutation(batch_left.shape[0])
-            return self._train(batch_left[p, :], batch_right[p, :], batch_y[p])
+            return self._train(batch_left[p, :], batch_right[p, :], batch_y[p], lr)
         else:
-            return self._train(batch_left, batch_right, batch_y)
+            return self._train(batch_left, batch_right, batch_y, lr)
 
     def fit(self, batch_gen, epochs, batch_size, batches=1, **kwargs):
         """
@@ -84,7 +88,7 @@ class BILSTM(object):
         batch_size: int, input to batch_gen
         batches: int, how many batches in between loss report
         """
-        for e in epochs:
+        for e in range(epochs):
             losses = []
             for b, ((left, right), y) in enumerate(batch_gen(batch_size)):
                 losses.append(self.train_on_batch(left, right, y, **kwargs))
@@ -118,6 +122,36 @@ class BILSTM(object):
         pass
 
 
+def batches(chrs, idxr=None, max_window_len=15):
+    chrs = list(chrs)
+    def aux(batch_size):
+        batch_left, batch_right, batch_y = [], [], []
+        for idx, c in enumerate(chrs[max_window_len: len(chrs)-max_window_len]):
+            if len(batch_y) > 0 and len(batch_y) % batch_size == 0:
+                yield (np.asarray(batch_left), np.asarray(batch_right)), \
+                    np.asarray(batch_y)
+                batch_left, batch_right, batch_y = [], [], []
+            idx += max_window_len
+            left = chrs[max(0, idx - max_window_len): idx]
+            right = chrs[idx + 1: min(len(chrs) + 1, idx + 1 + max_window_len)]
+            y = chrs[idx]
+            if idxr is not None:
+                left, right = idxr.transform(left), idxr.transform(right)
+                y = idxr.encode(y)
+            batch_left.append(left), batch_right.append(right), \
+                batch_y.append(y)
+    return aux
+
 
 if __name__ == '__main__':
-    pass
+    from casket.nlp_utils import Corpus, Indexer
+    from itertools import islice
+
+    train = Corpus("/home/enrique/corpora/EEBO/train")
+    idxr = Indexer()
+    idxr.fit(islice(train.chars(), 100000))
+    batch_gen = batches(islice(train.chars(), 100000), idxr=idxr)
+    vocab_size = idxr.vocab_len()
+    bilstm = BiLSTM(emb_dim=64, lstm_dim=128, vocab_size=vocab_size)
+    for loss in bilstm.fit(batch_gen, 5, 1024, batches=100):
+        print("Epoch loss:", np.mean(loss))
