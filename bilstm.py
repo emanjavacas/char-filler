@@ -6,6 +6,7 @@ import numpy as np
 from lasagne.layers import InputLayer, DenseLayer, ElemwiseSumLayer
 from lasagne.layers import LSTMLayer, EmbeddingLayer
 from lasagne.layers import get_output, get_all_params
+from lasagne.layers import get_all_param_values, set_all_param_values
 from lasagne.nonlinearities import softmax, tanh
 import lasagne
 
@@ -34,20 +35,22 @@ class BiLSTM(object):
         # Input is integer matrices (batch_size, seq_length)
         left_in = InputLayer(shape=(None, None), input_var=T.imatrix())
         right_in = InputLayer(shape=(None, None), input_var=T.imatrix())
-        self.emb_W = np.random.uniform(size=(vocab_size, emb_dim)).astype(np.float32)
+        self.emb_W = np.random.uniform(size=(vocab_size, emb_dim))\
+                              .astype(np.float32)
         emb_left = EmbeddingLayer(
             left_in, input_size=vocab_size, output_size=emb_dim, W=self.emb_W)
         emb_right = EmbeddingLayer(
             right_in, input_size=vocab_size, output_size=emb_dim, W=self.emb_W)
         merged = bilstm_layer(emb_left, emb_right, lstm_dim, n_layers=n_layers)
-        output = DenseLayer(merged, num_units=vocab_size, nonlinearity=softmax)
+        self.output = DenseLayer(
+            merged, num_units=vocab_size, nonlinearity=softmax)
 
         # T.nnet.categorical_crossentropy allows to represent true distribution
         # as an integer vector (implicitely casting to a one-hot matrix)
         lr, targets = T.fscalar('lr'), T.ivector('targets')
-        network_output = get_output(output)
+        network_output = get_output(self.output)
         cost = T.nnet.categorical_crossentropy(network_output, targets).mean()
-        params = get_all_params(output, trainable=True)
+        params = get_all_params(self.output, trainable=True)
         updates = lasagne.updates.adagrad(cost, params, lr)
 
         print("Compiling training function")
@@ -75,7 +78,8 @@ class BiLSTM(object):
         assert batch_left.shape[0] == batch_right.shape[0] == batch_y.shape[0]
         if shuffle:
             p = np.random.permutation(batch_left.shape[0])
-            return self._train(batch_left[p, :], batch_right[p, :], batch_y[p], lr)
+            return self._train(
+                batch_left[p, :], batch_right[p, :], batch_y[p], lr)
         else:
             return self._train(batch_left, batch_right, batch_y, lr)
 
@@ -115,48 +119,44 @@ class BiLSTM(object):
             else:
                 return np.argmax(out)
 
-    def save(self):
-        pass
+    def save(self, prefix):
+        import json
+        network_weights = get_all_param_values(self.output)
+        np.savez(prefix + ".npz", network_weights)
+        with open(prefix + ".json", "w") as f:
+            f.write(json.dumps(
+                {"vocab_size": self.vocab_size,
+                 "emb_dim": self.emb_dim,
+                 "lstm_dim": self.lstm_dim}))
 
-    def load(self):
-        pass
-
-
-def batches(chrs, idxr=None, num_examples=None, max_window_len=15):
-    start = 0
-    def aux(batch_size):
-        nonlocal start
-        batch_left, batch_right, batch_y = [], [], []
-        chrs_batch = list(islice(chrs, batch_size + (2 * max_window_len) + start))
-        trimmed = chrs_batch[max_window_len: -max_window_len]
-        for idx, c in enumerate(trimmed):
-            start += 1
-            idx += max_window_len
-            if len(batch_y) > 0 and len(batch_y) % batch_size == 0:
-                yield (np.asarray(batch_left), np.asarray(batch_right)), \
-                    np.asarray(batch_y)
-                batch_left, batch_right, batch_y = [], [], []
-            left = chrs_batch[max(0, idx - max_window_len): idx]
-            right = chrs_batch[idx + 1: min(len(chrs_batch) + 1, idx + 1 + max_window_len)]
-            y = chrs_batch[idx]
-            if idxr is not None:
-                left, right = idxr.transform(left), idxr.transform(right)
-                y = idxr.encode(y)
-            batch_left.append(left), batch_right.append(right), \
-                batch_y.append(y)
-    return aux
+    @classmethod
+    def load(cls, prefix):
+        import json
+        with open(prefix + ".json") as data:
+            pms = json.load(data)
+        network = cls(pms['emb_dim'], pms['lstm_dim'], pms['vocab_size'])
+        with np.load(prefix + '.npz') as data:
+            set_all_param_values(network.output)
+        return network
 
 
 if __name__ == '__main__':
     from casket.nlp_utils import Corpus, Indexer
-    from itertools import islice
 
-    emb_dim, lstm_dim, num_examples, batch_size, epochs = 64, 128, 1000000
+    emb_dim, lstm_dim, num_batches = 64, 128, 1000
     batch_size, epochs = 1024, 5
-    train = Corpus("/home/manjavacas/corpora/EEBO/train")
+    train = Corpus("/Users/quique/corpora/EEBO_sample/train", context=15)
     idxr = Indexer()
-    idxr.fit(islice(train.chars(), num_examples))
-    batch_gen = batches(train.chars(), idxr=idxr)
+    idxr.fit(train.chars())
+
+    def batch_gen(batch_size):
+        gen = train.generate_batches(
+            batch_size=batch_size, indexer=idxr, concat=False, mode='chars')
+        for idx, (X, y) in enumerate(gen):
+            if idx <= num_batches:
+                left, right = list(zip(*X))
+                yield (np.asarray(left), np.asarray(right)), np.asarray(y)
+
     vocab_size = idxr.vocab_len()
     bilstm = BiLSTM(emb_dim=64, lstm_dim=128, vocab_size=vocab_size)
     print("Starting training")
