@@ -7,7 +7,7 @@ from argparse import ArgumentParser
 from sklearn.metrics import accuracy_score
 from utils import lines_from_file
 from unsmoothed_lm import UnsmoothedLM, generate_pairs
-from canister.experiment import Experiment
+from casket.experiment import Experiment
 
 
 if __name__ == '__main__':

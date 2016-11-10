@@ -122,19 +122,23 @@ class BiLSTM(object):
         pass
 
 
-def batches(chrs, idxr=None, max_window_len=15):
-    chrs = list(chrs)
+def batches(chrs, idxr=None, num_examples=None, max_window_len=15):
+    start = 0
     def aux(batch_size):
+        nonlocal start
         batch_left, batch_right, batch_y = [], [], []
-        for idx, c in enumerate(chrs[max_window_len: len(chrs)-max_window_len]):
+        chrs_batch = list(islice(chrs, batch_size + (2 * max_window_len) + start))
+        trimmed = chrs_batch[max_window_len: -max_window_len]
+        for idx, c in enumerate(trimmed):
+            start += 1
+            idx += max_window_len
             if len(batch_y) > 0 and len(batch_y) % batch_size == 0:
                 yield (np.asarray(batch_left), np.asarray(batch_right)), \
                     np.asarray(batch_y)
                 batch_left, batch_right, batch_y = [], [], []
-            idx += max_window_len
-            left = chrs[max(0, idx - max_window_len): idx]
-            right = chrs[idx + 1: min(len(chrs) + 1, idx + 1 + max_window_len)]
-            y = chrs[idx]
+            left = chrs_batch[max(0, idx - max_window_len): idx]
+            right = chrs_batch[idx + 1: min(len(chrs_batch) + 1, idx + 1 + max_window_len)]
+            y = chrs_batch[idx]
             if idxr is not None:
                 left, right = idxr.transform(left), idxr.transform(right)
                 y = idxr.encode(y)
@@ -147,11 +151,14 @@ if __name__ == '__main__':
     from casket.nlp_utils import Corpus, Indexer
     from itertools import islice
 
-    train = Corpus("/home/enrique/corpora/EEBO/train")
+    emb_dim, lstm_dim, num_examples, batch_size, epochs = 64, 128, 1000000
+    batch_size, epochs = 1024, 5
+    train = Corpus("/home/manjavacas/corpora/EEBO/train")
     idxr = Indexer()
-    idxr.fit(islice(train.chars(), 100000))
-    batch_gen = batches(islice(train.chars(), 100000), idxr=idxr)
+    idxr.fit(islice(train.chars(), num_examples))
+    batch_gen = batches(train.chars(), idxr=idxr)
     vocab_size = idxr.vocab_len()
     bilstm = BiLSTM(emb_dim=64, lstm_dim=128, vocab_size=vocab_size)
-    for loss in bilstm.fit(batch_gen, 5, 1024, batches=100):
+    print("Starting training")
+    for loss in bilstm.fit(batch_gen, epochs, batch_size, batches=100):
         print("Epoch loss:", np.mean(loss))

@@ -6,7 +6,7 @@ import itertools
 import numpy as np
 from keras.utils.np_utils import to_categorical
 
-from corpus import Indexer, Corpus
+from casket.nlp_utils import Indexer, Corpus
 from utils import dump_json
 import lstms
 
