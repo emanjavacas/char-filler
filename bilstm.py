@@ -83,6 +83,10 @@ class BiLSTM(object):
         else:
             return self._train(batch_left, batch_right, batch_y, lr)
 
+    def test_on_batch(self, batch_left, batch_right, batch_y, **kwargs):
+        pred = self.predict(batch_left, batch_right, max_n=False)
+        return lasagne.objectives.categorical_accuracy(pred, batch_y, **kwargs)
+
     def fit(self, batch_gen, epochs, batch_size, batches=1, **kwargs):
         """
         Parameters:
@@ -97,27 +101,21 @@ class BiLSTM(object):
             for b, ((left, right), y) in enumerate(batch_gen(batch_size)):
                 losses.append(self.train_on_batch(left, right, y, **kwargs))
                 if b % batches == 0:
-                    print("Epoch [%d], batch [%d], Avg. training loss [%f]" %
-                          (e, b, np.mean(losses)), end='\r')
-            yield losses
+                    yield False, e, b, losses
+            yield True, e, b, losses
 
-    def predict(self, left_in, right_in, max_n=False, return_probs=False):
+    def predict(self, left_in, right_in, max_n=1, return_probs=False):
         """
         probably needs embedding in a batch matrix of length 1 if
         left_in and right_in are integer vectors.
         """
         out = self._predict(left_in, right_in)
-        if max_n:
-            idx = np.argsort(out)
-            if return_probs:
-                return idx[:max_n], out[idx[:max_n]]
-            else:
-                return idx[:max_n]
+        idx = np.argsort(out)
+        max_n = max_n or idx.shape[0]
+        if return_probs:
+            return idx[:max_n], out[idx[:max_n]]
         else:
-            if return_probs:
-                return np.argmax(out), out[np.argmax(out)]
-            else:
-                return np.argmax(out)
+            return idx[:max_n]
 
     def save(self, prefix):
         import json
@@ -145,11 +143,12 @@ if __name__ == '__main__':
     parser = ArgumentParser()
     parser.add_argument('-R', '--rnn_layers', type=int, default=1)
     parser.add_argument('-m', '--emb_dim', type=int, default=28)
-    parser.add_argument('-l', '--lstm_dim', type=int, default=100)
+    parser.add_argument('-l', '--lstm_dim', type=int, default=64)
     parser.add_argument('-D', '--dropout', type=float, default=0.0)
-    parser.add_argument('-b', '--batch_size', type=int, default=50)
+    parser.add_argument('-c', '--context', type=float, default=15)
+    parser.add_argument('-b', '--batch_size', type=int, default=1024)
     parser.add_argument('-e', '--epochs', type=int, default=10)
-    parser.add_argument('-n', '--num_batches', type=int, default=10000)
+    parser.add_argument('-n', '--num_batches', type=int, default=1000)
     parser.add_argument('-r', '--root', type=str, required=True)
     parser.add_argument('-p', '--model_prefix', type=str, required=True)
     parser.add_argument('-d', '--db', type=str, default='db.json')
@@ -170,21 +169,35 @@ if __name__ == '__main__':
     EMB_DIM = args.emb_dim
     LSTM_DIM = args.lstm_dim
     DROPOUT = args.dropout
+    CONTEXT = args.context
+    LOSS = args.loss
 
-    train = Corpus(root, context=15)
+    train = Corpus(root + "/train", context=CONTEXT)
+    test = Corpus(root + "/test", context=CONTEXT)
+    dev = Corpus(root + "/dev", context=CONTEXT)
     idxr = Indexer()
     idxr.fit(train.chars())
 
-    def batch_gen(batch_size):
-        gen = train.generate_batches(
-            batch_size=BATCH_SIZE, indexer=idxr, concat=False, mode='chars')
+    def batch_gen(batch_size, corpus=train):
+        gen = corpus.generate_batches(
+            batch_size=batch_size, indexer=idxr, concat=False, mode='chars')
         for idx, (X, y) in enumerate(gen):
             if idx <= NUM_BATCHES:
                 left, right = list(zip(*X))
                 yield (np.asarray(left), np.asarray(right)), np.asarray(y)
 
+    test_X_l, test_X_r, test_y = next(batch_gen(2000, corpus=test))
+    dev_X_l, dev_X_r, dev_y = next(batch_gen(2000, corpus=dev))
+
     vocab_size = idxr.vocab_len()
     bilstm = BiLSTM(emb_dim=EMB_DIM, lstm_dim=LSTM_DIM, vocab_size=vocab_size)
     print("Starting training")
-    for loss in bilstm.fit(batch_gen, EPOCHS, BATCH_SIZE, batches=args.loss):
-        print("Epoch loss:", np.mean(loss))
+    for flag, epoch, batch, losses in bilstm.fit(
+            batch_gen, EPOCHS, BATCH_SIZE, batches=LOSS):
+        if flag:                # do epoch testing
+            acc = bilstm.test_on_batch(test_X_l, text_X_r, test_y)
+            print("Epoch test accuracy [%f]" % acc)
+        else:                   # do batch logging
+            acc = bilstm.test_on_batch(dev_X_l, dev_X_r, dev_y)
+            print("Epoch [%d], batch [%d], Avg. loss [%f], Acc [%f]" %
+                  (epoch, batch, np.mean(losses), acc), end='\r')
