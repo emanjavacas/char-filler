@@ -98,7 +98,7 @@ class BiLSTM(object):
                 losses.append(self.train_on_batch(left, right, y, **kwargs))
                 if b % batches == 0:
                     print("Epoch [%d], batch [%d], Avg. training loss [%f]" %
-                          (e, b, np.mean(losses)))
+                          (e, b, np.mean(losses)), end='\r')
             yield losses
 
     def predict(self, left_in, right_in, max_n=False, return_probs=False):
@@ -141,24 +141,50 @@ class BiLSTM(object):
 
 
 if __name__ == '__main__':
-    from casket.nlp_utils import Corpus, Indexer
+    from argparse import ArgumentParser
+    parser = ArgumentParser()
+    parser.add_argument('-R', '--rnn_layers', type=int, default=1)
+    parser.add_argument('-m', '--emb_dim', type=int, default=28)
+    parser.add_argument('-l', '--lstm_dim', type=int, default=100)
+    parser.add_argument('-D', '--dropout', type=float, default=0.0)
+    parser.add_argument('-b', '--batch_size', type=int, default=50)
+    parser.add_argument('-e', '--epochs', type=int, default=10)
+    parser.add_argument('-n', '--num_batches', type=int, default=10000)
+    parser.add_argument('-r', '--root', type=str, required=True)
+    parser.add_argument('-p', '--model_prefix', type=str, required=True)
+    parser.add_argument('-d', '--db', type=str, default='db.json')
+    parser.add_argument('-L', '--loss', type=int, default=1,
+                        help='report loss every l batches')
 
-    emb_dim, lstm_dim, num_batches = 64, 128, 1000
-    batch_size, epochs = 1024, 5
-    train = Corpus("/Users/quique/corpora/EEBO_sample/train", context=15)
+    from casket.nlp_utils import Corpus, Indexer
+    import os
+
+    args = parser.parse_args()
+    root = args.root
+    assert os.path.isdir(root), "Root path doesn't exist"
+
+    BATCH_SIZE = args.batch_size
+    NUM_BATCHES = args.num_batches
+    EPOCHS = args.epochs
+    RNN_LAYERS = args.rnn_layers
+    EMB_DIM = args.emb_dim
+    LSTM_DIM = args.lstm_dim
+    DROPOUT = args.dropout
+
+    train = Corpus(root, context=15)
     idxr = Indexer()
     idxr.fit(train.chars())
 
     def batch_gen(batch_size):
         gen = train.generate_batches(
-            batch_size=batch_size, indexer=idxr, concat=False, mode='chars')
+            batch_size=BATCH_SIZE, indexer=idxr, concat=False, mode='chars')
         for idx, (X, y) in enumerate(gen):
-            if idx <= num_batches:
+            if idx <= NUM_BATCHES:
                 left, right = list(zip(*X))
                 yield (np.asarray(left), np.asarray(right)), np.asarray(y)
 
     vocab_size = idxr.vocab_len()
-    bilstm = BiLSTM(emb_dim=64, lstm_dim=128, vocab_size=vocab_size)
+    bilstm = BiLSTM(emb_dim=EMB_DIM, lstm_dim=LSTM_DIM, vocab_size=vocab_size)
     print("Starting training")
-    for loss in bilstm.fit(batch_gen, epochs, batch_size, batches=100):
+    for loss in bilstm.fit(batch_gen, EPOCHS, BATCH_SIZE, batches=args.loss):
         print("Epoch loss:", np.mean(loss))
