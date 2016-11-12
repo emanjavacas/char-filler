@@ -3,47 +3,58 @@ import theano
 import theano.tensor as T
 import numpy as np
 
-from lasagne.layers import InputLayer, DenseLayer, ElemwiseSumLayer
-from lasagne.layers import LSTMLayer, EmbeddingLayer
+from lasagne.layers import InputLayer, DenseLayer, ElemwiseSumLayer, ConcatLayer
+from lasagne.layers import LSTMLayer, EmbeddingLayer, ReshapeLayer
 from lasagne.layers import get_output, get_all_params
 from lasagne.layers import get_all_param_values, set_all_param_values
 from lasagne.nonlinearities import softmax, tanh
 import lasagne
 
 
-def bilstm_layer(input_left, input_right, lstm_dim, n_layers=1):
+def bilstm_layer(input_layer, lstm_dim, batch_size, context,
+                 depth=1, grad_clip=100):
+    """
+    batch_size: int or symbolic_var (input_var.shape[0])
+    context: int
+    """
+    lstm = emb
     for n in range(n_layers):
-        left_lstm = LSTMLayer(
-            input_left, lstm_dim, only_return_final=True, backwards=True)
-        right_lstm = LSTMLayer(
-            input_right, lstm_dim, only_return_final=True, backwards=False)
-        dense_left = DenseLayer(
-            left_lstm, num_units=lstm_dim, nonlinearity=tanh)
-        dense_right = DenseLayer(
-            right_lstm, num_units=lstm_dim, nonlinearity=tanh)
-        input_left = dense_left
-        input_right = dense_right
-    return ElemwiseSumLayer([dense_left, dense_right])
+        fwd_lstm = LSTMLayer(lstm, lstm_dim, grad_clipping=grad_clip)
+        bwd_lstm = LSTMLayer(lstm, lstm_dim, backwards=True,
+                             grad_clipping=grad_clip)
+        # No need to reverse output of bwd_lstm since backwards is defined:
+        # backwards : bool
+        #   process the sequence backwards and then reverse the output again
+        #   such that the output from the layer is always from x1x1 to xnxn.
+        # concat over lstm output dim (axis=2)
+        lstm = ConcatLayer(incomings=[fwd_lstm, bwd_lstm], axis=2)
+        # reshape for dense
+        lstm = ReshapeLayer(lstm, (-1, lstm_dim * 2))
+        lstm = DenseLayer(lstm, num_units=lstm_dim, nonlinearity=tanh)
+        # reshape back to original input
+        lstm = ReshapeLayer(lstm, (batch_size, context * 2, lstm_dim))
+    return lstm
 
 
 class BiLSTM(object):
-    def __init__(self, emb_dim, lstm_dim, vocab_size, n_layers=1):
+    def __init__(self, emb_dim, lstm_dim, vocab_size, context,
+                 depth=1, grad_clip=100):
         self.emb_dim = emb_dim
         self.lstm_dim = lstm_dim
         self.vocab_size = vocab_size
 
         # Input is integer matrices (batch_size, seq_length)
-        left_in = InputLayer(shape=(None, None), input_var=T.imatrix())
-        right_in = InputLayer(shape=(None, None), input_var=T.imatrix())
-        self.emb_W = np.random.uniform(size=(vocab_size, emb_dim))\
+        input_layer = InputLayer(shape=(None, None),
+                                 input_var=T.imatrix())
+        self.emb_W = np.random.uniform(size=(vocab_size, emb_dim)) \
                               .astype(np.float32)
-        emb_left = EmbeddingLayer(
-            left_in, input_size=vocab_size, output_size=emb_dim, W=self.emb_W)
-        emb_right = EmbeddingLayer(
-            right_in, input_size=vocab_size, output_size=emb_dim, W=self.emb_W)
-        merged = bilstm_layer(emb_left, emb_right, lstm_dim, n_layers=n_layers)
+        emb = EmbeddingLayer(input_layer, input_size=vocab_size,
+                             output_size=emb_dim, W=self.emb_W)
+        batch_size, _ = input_layer.input_var.shape
+        lstm = bilstm_layer(emb, lstm_dim, batch_size, context,
+                            depth=depth, grad_clip=grad_clip)
         self.output = DenseLayer(
-            merged, num_units=vocab_size, nonlinearity=softmax)
+            lstm, num_units=vocab_size, nonlinearity=softmax)
 
         # T.nnet.categorical_crossentropy allows to represent true distribution
         # as an integer vector (implicitely casting to a one-hot matrix)
@@ -57,7 +68,7 @@ class BiLSTM(object):
 
         print("Compiling training function")
         self._train = theano.function(
-            [left_in.input_var, right_in.input_var, targets, lr],
+            [input_layer.input_var, targets, lr],
             [loss, acc],
             updates=updates,
             allow_input_downcast=True)
@@ -69,60 +80,53 @@ class BiLSTM(object):
 
         print("Compiling test function")
         self._test = theano.function(
-            [left_in.input_var, right_in.input_var, targets],
+            [input_layer.input_var, targets],
             [test_loss, test_acc],
             allow_input_downcast=True)
 
         print("Compiling predict function")
         self._predict = theano.function(
-            [left_in.input_var, right_in.input_var],
+            [input_layer.input_var],
             test_pred,
             allow_input_downcast=True)
 
-    def train_on_batch(self, batch_left, batch_right, batch_y,
-                       lr=0.01, shuffle=False):
+    def train_on_batch(self, batch_X, batch_y, lr=0.01, shuffle=True):
         """
         Parameters:
         -----------
-        batch_left: np.array(size=(batch_size, left_seq_len), dtype=np.int)
-        batch_left: np.array(size=(batch_size, right_seq_len), dtype=np.int)
+        batch_X: np.array(size=(batch_size, seq_len), dtype=np.int)
         batch_y: np.array(size=(batch_size, vocab_size))
         """
-        assert batch_left.shape[0] == batch_right.shape[0] == batch_y.shape[0]
+        assert batch_X.shape[0] == batch_y.shape[0]
         if shuffle:
-            p = np.random.permutation(batch_left.shape[0])
-            return self._train(
-                batch_left[p, :], batch_right[p, :], batch_y[p], lr)
+            p = np.random.permutation(batch_X.shape[0])
+            return self._train(batch_X[p, :], batch_y[p], lr)
         else:
-            return self._train(batch_left, batch_right, batch_y, lr)
+            return self._train(batch_X, batch_y, lr)
 
-    def test_on_batch(self, batch_left, batch_right, batch_y, **kwargs):
-        return self._test(batch_left, batch_right, batch_y)
+    def test_on_batch(self, batch_X, batch_y, **kwargs):
+        return self._test(batch_X, batch_y)
 
     def fit(self, batch_gen, epochs, batch_size, batches=1, **kwargs):
         """
         Parameters:
         -----------
-        batch_gen: generator function returning batch tuples ((left, right), y)
+        batch_gen: generator function returning batch tuples (X, y)
         epochs: int, number of epochs
         batch_size: int, input to batch_gen
         batches: int, how many batches in between loss report
         """
         for e in range(epochs):
             losses, accs = [], []
-            for b, ((left, right), y) in enumerate(batch_gen(batch_size)):
-                loss, acc = self.train_on_batch(left, right, y, **kwargs)
+            for b, (X, y) in enumerate(batch_gen(batch_size)):
+                loss, acc = self.train_on_batch(X, y, **kwargs)
                 losses.append(loss), accs.append(acc)
                 if b % batches == 0:
                     yield False, e, b, losses, accs
             yield True, e, b, losses, accs
 
-    def predict(self, left_in, right_in, max_n=1, return_probs=False):
-        """
-        probably needs embedding in a batch matrix of length 1 if
-        left_in and right_in are integer vectors.
-        """
-        out = self._predict(left_in, right_in)
+    def predict(self, X, max_n=1, return_probs=False):
+        out = self._predict(X)
         idx = np.argsort(out)
         max_n = max_n or idx.shape[0]
         if return_probs:
@@ -195,32 +199,32 @@ if __name__ == '__main__':
 
     def batch_gen(batch_size, corpus=train):
         gen = corpus.generate_batches(
-            batch_size=batch_size, indexer=idxr, concat=False, mode='chars')
+            batch_size=batch_size, indexer=idxr, concat=True, mode='chars')
         for idx, (X, y) in enumerate(gen):
             if idx <= NUM_BATCHES:
-                left, right = list(zip(*X))
-                yield (np.asarray(left), np.asarray(right)), np.asarray(y)
+                yield (np.asarray(X), np.asarray(y))
 
-    (test_X_l, test_X_r), test_y = next(batch_gen(2000, corpus=test))
-    (dev_X_l, dev_X_r), dev_y = next(batch_gen(1000, corpus=dev))
+    test_X, test_y = next(batch_gen(2000, corpus=test))
+    dev_X, dev_y = next(batch_gen(1000, corpus=dev))
 
     vocab_size = idxr.vocab_len()
-    bilstm = BiLSTM(emb_dim=EMB_DIM, lstm_dim=LSTM_DIM, vocab_size=vocab_size)
+    bilstm = BiLSTM(emb_dim=EMB_DIM, lstm_dim=LSTM_DIM,
+                    vocab_size=vocab_size, context=CONTEXT, depth=RNN_LAYERS)
     
     print("Starting training")
     db = E.use(path, exp_id='lasagne-bilstm').model("")
     with db.session(vars(args), ensure_unique=False) as session:
         for flag, epoch, batch, losses, accs in bilstm.fit(
-                batch_gen, EPOCHS, BATCH_SIZE, batches=LOSS, shuffle=True):
+                batch_gen, EPOCHS, BATCH_SIZE, batches=LOSS):
             if flag:                # do epoch testing
-                loss, acc = bilstm.test_on_batch(dev_X_l, dev_X_r, dev_y)
+                loss, acc = bilstm.test_on_batch(dev_X, dev_y)
                 session.add_epoch(epoch, {'loss': float(loss),
                                           'acc': float(acc)})
                 print("Epoch test accuracy [%f]" % acc)
             else:                   # do batch logging
                 print("Epoch [%d], batch [%d], Avg. loss [%f], Acc [%f]" %
                       (epoch, batch, np.mean(losses), np.mean(accs)), end='\r')
-        loss, acc = bilstm.test_on_batch(test_X_l, test_X_r, test_y)
+        loss, acc = bilstm.test_on_batch(test_X, test_y)
         session.add_result({'test_acc': float(acc), 'test_loss': float(loss)})
 
     model.save(args.model_prefix + ".weights")
