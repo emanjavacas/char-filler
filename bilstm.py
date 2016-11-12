@@ -53,7 +53,7 @@ class BiLSTM(object):
         acc = T.mean(T.eq(T.argmax(pred, axis=1), targets),
                      dtype=theano.config.floatX)
         params = get_all_params(self.output, trainable=True)
-        updates = lasagne.updates.adagrad(loss, params, lr)
+        updates = lasagne.updates.rmsprop(loss, params, lr)
 
         print("Compiling training function")
         self._train = theano.function(
@@ -214,13 +214,14 @@ if __name__ == '__main__':
                 batch_gen, EPOCHS, BATCH_SIZE, batches=LOSS, shuffle=True):
             if flag:                # do epoch testing
                 loss, acc = bilstm.test_on_batch(dev_X_l, dev_X_r, dev_y)
-                session.add_epoch(epoch, {'loss': loss, 'acc': acc})
+                session.add_epoch(epoch, {'loss': float(loss),
+                                          'acc': float(acc)})
                 print("Epoch test accuracy [%f]" % acc)
             else:                   # do batch logging
                 print("Epoch [%d], batch [%d], Avg. loss [%f], Acc [%f]" %
                       (epoch, batch, np.mean(losses), np.mean(accs)), end='\r')
         loss, acc = bilstm.test_on_batch(test_X_l, test_X_r, test_y)
-        session.add_result({'test_acc': acc, 'test_loss': loss})
+        session.add_result({'test_acc': float(acc), 'test_loss': float(loss)})
 
     model.save(args.model_prefix + ".weights")
     idxr.save(args.model_prefix + '_indexer.json')
