@@ -48,22 +48,35 @@ class BiLSTM(object):
         # T.nnet.categorical_crossentropy allows to represent true distribution
         # as an integer vector (implicitely casting to a one-hot matrix)
         lr, targets = T.fscalar('lr'), T.ivector('targets')
-        network_output = get_output(self.output)
-        cost = T.nnet.categorical_crossentropy(network_output, targets).mean()
+        pred = get_output(self.output)
+        loss = T.nnet.categorical_crossentropy(pred, targets).mean()
+        acc = T.mean(T.eq(T.argmax(pred, axis=1), targets),
+                     dtype=theano.config.floatX)
         params = get_all_params(self.output, trainable=True)
-        updates = lasagne.updates.adagrad(cost, params, lr)
+        updates = lasagne.updates.adagrad(loss, params, lr)
 
         print("Compiling training function")
         self._train = theano.function(
             [left_in.input_var, right_in.input_var, targets, lr],
-            cost,
+            [loss, acc],
             updates=updates,
+            allow_input_downcast=True)
+
+        test_pred = get_output(self.output, deterministic=True)
+        test_loss = T.nnet.categorical_crossentropy(test_pred, targets).mean()
+        test_acc = T.mean(T.eq(T.argmax(test_pred, axis=1), targets),
+                          dtype=theano.config.floatX)
+
+        print("Compiling test function")
+        self._test = theano.function(
+            [left_in.input_var, right_in.input_var, targets],
+            [test_loss, test_acc],
             allow_input_downcast=True)
 
         print("Compiling predict function")
         self._predict = theano.function(
             [left_in.input_var, right_in.input_var],
-            network_output,
+            test_pred,
             allow_input_downcast=True)
 
     def train_on_batch(self, batch_left, batch_right, batch_y,
@@ -84,8 +97,7 @@ class BiLSTM(object):
             return self._train(batch_left, batch_right, batch_y, lr)
 
     def test_on_batch(self, batch_left, batch_right, batch_y, **kwargs):
-        pred = self.predict(batch_left, batch_right, max_n=False)
-        return lasagne.objectives.categorical_accuracy(pred, batch_y, **kwargs)
+        return self._test(batch_left, batch_right, batch_y)
 
     def fit(self, batch_gen, epochs, batch_size, batches=1, **kwargs):
         """
@@ -97,12 +109,13 @@ class BiLSTM(object):
         batches: int, how many batches in between loss report
         """
         for e in range(epochs):
-            losses = []
+            losses, accs = [], []
             for b, ((left, right), y) in enumerate(batch_gen(batch_size)):
-                losses.append(self.train_on_batch(left, right, y, **kwargs))
+                loss, acc = self.train_on_batch(left, right, y, **kwargs)
+                losses.append(loss), accs.append(acc)
                 if b % batches == 0:
-                    yield False, e, b, losses
-            yield True, e, b, losses
+                    yield False, e, b, losses, accs
+            yield True, e, b, losses, accs
 
     def predict(self, left_in, right_in, max_n=1, return_probs=False):
         """
@@ -148,18 +161,20 @@ if __name__ == '__main__':
     parser.add_argument('-c', '--context', type=float, default=15)
     parser.add_argument('-b', '--batch_size', type=int, default=1024)
     parser.add_argument('-e', '--epochs', type=int, default=10)
-    parser.add_argument('-n', '--num_batches', type=int, default=1000)
+    parser.add_argument('-n', '--num_batches', type=int, default=10000)
     parser.add_argument('-r', '--root', type=str, required=True)
     parser.add_argument('-p', '--model_prefix', type=str, required=True)
     parser.add_argument('-d', '--db', type=str, default='db.json')
-    parser.add_argument('-L', '--loss', type=int, default=1,
+    parser.add_argument('-L', '--loss', type=int, default=10,
                         help='report loss every l batches')
 
     from casket.nlp_utils import Corpus, Indexer
+    from casket import Experiment as E
     import os
 
     args = parser.parse_args()
     root = args.root
+    path = args.db
     assert os.path.isdir(root), "Root path doesn't exist"
 
     BATCH_SIZE = args.batch_size
@@ -186,18 +201,26 @@ if __name__ == '__main__':
                 left, right = list(zip(*X))
                 yield (np.asarray(left), np.asarray(right)), np.asarray(y)
 
-    test_X_l, test_X_r, test_y = next(batch_gen(2000, corpus=test))
-    dev_X_l, dev_X_r, dev_y = next(batch_gen(2000, corpus=dev))
+    (test_X_l, test_X_r), test_y = next(batch_gen(2000, corpus=test))
+    (dev_X_l, dev_X_r), dev_y = next(batch_gen(1000, corpus=dev))
 
     vocab_size = idxr.vocab_len()
     bilstm = BiLSTM(emb_dim=EMB_DIM, lstm_dim=LSTM_DIM, vocab_size=vocab_size)
+    
     print("Starting training")
-    for flag, epoch, batch, losses in bilstm.fit(
-            batch_gen, EPOCHS, BATCH_SIZE, batches=LOSS):
-        if flag:                # do epoch testing
-            acc = bilstm.test_on_batch(test_X_l, text_X_r, test_y)
-            print("Epoch test accuracy [%f]" % acc)
-        else:                   # do batch logging
-            acc = bilstm.test_on_batch(dev_X_l, dev_X_r, dev_y)
-            print("Epoch [%d], batch [%d], Avg. loss [%f], Acc [%f]" %
-                  (epoch, batch, np.mean(losses), acc), end='\r')
+    db = E.use(path, exp_id='lasagne-bilstm').model("")
+    with db.session(vars(args), ensure_unique=False) as session:
+        for flag, epoch, batch, losses, accs in bilstm.fit(
+                batch_gen, EPOCHS, BATCH_SIZE, batches=LOSS, shuffle=True):
+            if flag:                # do epoch testing
+                loss, acc = bilstm.test_on_batch(dev_X_l, dev_X_r, dev_y)
+                session.add_epoch(epoch, {'loss': loss, 'acc': acc})
+                print("Epoch test accuracy [%f]" % acc)
+            else:                   # do batch logging
+                print("Epoch [%d], batch [%d], Avg. loss [%f], Acc [%f]" %
+                      (epoch, batch, np.mean(losses), np.mean(accs)), end='\r')
+        loss, acc = bilstm.test_on_batch(test_X_l, test_X_r, test_y)
+        session.add_result({'test_acc': acc, 'test_loss': loss})
+
+    model.save(args.model_prefix + ".weights")
+    idxr.save(args.model_prefix + '_indexer.json')
