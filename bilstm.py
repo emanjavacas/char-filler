@@ -3,58 +3,74 @@ import theano
 import theano.tensor as T
 import numpy as np
 
-from lasagne.layers import InputLayer, DenseLayer, ElemwiseSumLayer, ConcatLayer
-from lasagne.layers import LSTMLayer, EmbeddingLayer, ReshapeLayer
+from lasagne.layers import InputLayer, DenseLayer, ConcatLayer, ElemwiseSumLayer
+from lasagne.layers import LSTMLayer, EmbeddingLayer, ReshapeLayer, dropout, flatten
 from lasagne.layers import get_output, get_all_params
 from lasagne.layers import get_all_param_values, set_all_param_values
 from lasagne.nonlinearities import softmax, tanh
 import lasagne
 
 
-def bilstm_layer(input_layer, lstm_dim, batch_size, context,
-                 depth=1, grad_clip=100):
+def bilstm_layer(input_layer, lstm_dim, batch_size, lstm_shape,
+                 add_dense=True, dropout_p=0.2, depth=1, grad_clip=100):
     """
-    batch_size: int or symbolic_var (input_var.shape[0])
+    batch_size: int or symbolic_var (e.g. input_var.shape[0])
     context: int
     """
-    lstm = emb
-    for n in range(n_layers):
-        fwd_lstm = LSTMLayer(lstm, lstm_dim, grad_clipping=grad_clip)
-        bwd_lstm = LSTMLayer(lstm, lstm_dim, backwards=True,
-                             grad_clipping=grad_clip)
+    lstm = input_layer    
+    for n in range(depth):
+        fwd = LSTMLayer(lstm, lstm_dim, grad_clipping=grad_clip,
+                        only_return_final=False)
         # No need to reverse output of bwd_lstm since backwards is defined:
         # backwards : bool
         #   process the sequence backwards and then reverse the output again
-        #   such that the output from the layer is always from x1x1 to xnxn.
-        # concat over lstm output dim (axis=2)
-        lstm = ConcatLayer(incomings=[fwd_lstm, bwd_lstm], axis=2)
-        # reshape for dense
-        lstm = ReshapeLayer(lstm, (-1, lstm_dim * 2))
-        lstm = DenseLayer(lstm, num_units=lstm_dim, nonlinearity=tanh)
-        # reshape back to original input
-        lstm = ReshapeLayer(lstm, (batch_size, context * 2, lstm_dim))
+        #   such that the output from the layer is always from x1x1 to xnxn.        
+        bwd = LSTMLayer(lstm, lstm_dim, grad_clipping=grad_clip,
+                        only_return_final=False, backwards=True)
+        if add_dense:
+            # reshape for dense
+            fwd = ReshapeLayer(fwd, (-1, lstm_dim))
+            bwd = ReshapeLayer(bwd, (-1, lstm_dim))
+            fwd = DenseLayer(fwd, num_units=lstm_dim, nonlinearity=tanh)
+            bwd = DenseLayer(bwd, num_units=lstm_dim, nonlinearity=tanh)
+            # dropout
+            fwd = dropout(fwd, p=dropout_p)
+            bwd = dropout(bwd, p=dropout_p)
+            # reshape back to input format
+            fwd = ReshapeLayer(fwd, lstm_shape)
+            bwd = ReshapeLayer(bwd, lstm_shape)        
+        # merge over lstm output dim (axis=2)
+        lstm = ElemwiseSumLayer(incomings=[fwd, bwd])
     return lstm
 
 
 class BiLSTM(object):
-    def __init__(self, emb_dim, lstm_dim, vocab_size, context,
-                 depth=1, grad_clip=100):
+    def __init__(self, emb_dim, lstm_dim, hid_dim, vocab_size, context,
+                 add_dense=True, dropout_p=0.2, depth=1, grad_clip=100):
         self.emb_dim = emb_dim
         self.lstm_dim = lstm_dim
         self.vocab_size = vocab_size
 
         # Input is integer matrices (batch_size, seq_length)
-        input_layer = InputLayer(shape=(None, None),
-                                 input_var=T.imatrix())
+        input_layer = InputLayer(shape=(None, context * 2),
+                                 input_var=T.imatrix())        
         self.emb_W = np.random.uniform(size=(vocab_size, emb_dim)) \
                               .astype(np.float32)
         emb = EmbeddingLayer(input_layer, input_size=vocab_size,
                              output_size=emb_dim, W=self.emb_W)
         batch_size, _ = input_layer.input_var.shape
-        lstm = bilstm_layer(emb, lstm_dim, batch_size, context,
-                            depth=depth, grad_clip=grad_clip)
-        self.output = DenseLayer(
-            lstm, num_units=vocab_size, nonlinearity=softmax)
+        lstm_shape = (batch_size, context * 2, lstm_dim)
+        lstm = bilstm_layer(
+            emb, lstm_dim, batch_size, lstm_shape, add_dense=add_dense,
+            dropout_p=dropout_p, depth=depth, grad_clip=grad_clip)
+        # time distributed dense
+        output_shape = (batch_size, context * 2, hid_dim)
+        lstm = ReshapeLayer(lstm, (-1, lstm_dim))
+        lstm = DenseLayer(lstm, num_units=hid_dim)
+        lstm = ReshapeLayer(dropout(lstm, p=dropout_p), output_shape)
+        # flatten
+        lstm = flatten(lstm)
+        self.output = DenseLayer(lstm, num_units=vocab_size, nonlinearity=softmax)
 
         # T.nnet.categorical_crossentropy allows to represent true distribution
         # as an integer vector (implicitely casting to a one-hot matrix)
@@ -159,13 +175,15 @@ if __name__ == '__main__':
     from argparse import ArgumentParser
     parser = ArgumentParser()
     parser.add_argument('-R', '--rnn_layers', type=int, default=1)
-    parser.add_argument('-m', '--emb_dim', type=int, default=28)
-    parser.add_argument('-l', '--lstm_dim', type=int, default=64)
+    parser.add_argument('-m', '--emb_dim', type=int, default=64)
+    parser.add_argument('-l', '--lstm_dim', type=int, default=124)
+    parser.add_argument('-H', '--hid_dim', type=int, default=248)
     parser.add_argument('-D', '--dropout', type=float, default=0.0)
+    parser.add_argument('-f', '--add_dense', type=bool, default=False)
     parser.add_argument('-c', '--context', type=float, default=15)
     parser.add_argument('-b', '--batch_size', type=int, default=1024)
     parser.add_argument('-e', '--epochs', type=int, default=10)
-    parser.add_argument('-n', '--num_batches', type=int, default=10000)
+    parser.add_argument('-n', '--num_examples', type=int, default=10000000)
     parser.add_argument('-r', '--root', type=str, required=True)
     parser.add_argument('-p', '--model_prefix', type=str, required=True)
     parser.add_argument('-d', '--db', type=str, default='db.json')
@@ -182,13 +200,15 @@ if __name__ == '__main__':
     assert os.path.isdir(root), "Root path doesn't exist"
 
     BATCH_SIZE = args.batch_size
-    NUM_BATCHES = args.num_batches
+    NUM_BATCHES = int(args.num_examples / BATCH_SIZE)
     EPOCHS = args.epochs
     RNN_LAYERS = args.rnn_layers
     EMB_DIM = args.emb_dim
     LSTM_DIM = args.lstm_dim
+    HID_DIM = args.hid_dim
     DROPOUT = args.dropout
     CONTEXT = args.context
+    ADD_DENSE = args.add_dense
     LOSS = args.loss
 
     train = Corpus(root + "/train", context=CONTEXT)
@@ -204,28 +224,40 @@ if __name__ == '__main__':
             if idx <= NUM_BATCHES:
                 yield (np.asarray(X), np.asarray(y))
 
-    test_X, test_y = next(batch_gen(2000, corpus=test))
-    dev_X, dev_y = next(batch_gen(1000, corpus=dev))
+    def log_batch(epoch, batch, losses, accs):
+        log = "Epoch [%d], batch [%d], Avg. loss [%f], Avg. acc [%f], acc [%f]"
+        print(log % (epoch, batch, np.mean(losses), np.mean(accs), accs[-1]),
+              end='\r')
+
+    dev_size = int(args.num_examples / 7.5)
+    test_X, test_y = next(batch_gen(dev_size, corpus=test))
+    dev_X, dev_y = next(batch_gen(dev_size, corpus=dev))
 
     vocab_size = idxr.vocab_len()
-    bilstm = BiLSTM(emb_dim=EMB_DIM, lstm_dim=LSTM_DIM,
-                    vocab_size=vocab_size, context=CONTEXT, depth=RNN_LAYERS)
+    bilstm = BiLSTM(emb_dim=EMB_DIM, lstm_dim=LSTM_DIM, hid_dim=HID_DIM,
+                    vocab_size=vocab_size, context=CONTEXT, depth=RNN_LAYERS,
+                    add_dense=ADD_DENSE, dropout_p=DROPOUT)
     
     print("Starting training")
     db = E.use(path, exp_id='lasagne-bilstm').model("")
     with db.session(vars(args), ensure_unique=False) as session:
-        for flag, epoch, batch, losses, accs in bilstm.fit(
-                batch_gen, EPOCHS, BATCH_SIZE, batches=LOSS):
-            if flag:                # do epoch testing
-                loss, acc = bilstm.test_on_batch(dev_X, dev_y)
-                session.add_epoch(epoch, {'loss': float(loss),
-                                          'acc': float(acc)})
-                print("Epoch test accuracy [%f]" % acc)
-            else:                   # do batch logging
-                print("Epoch [%d], batch [%d], Avg. loss [%f], Acc [%f]" %
-                      (epoch, batch, np.mean(losses), np.mean(accs)), end='\r')
-        loss, acc = bilstm.test_on_batch(test_X, test_y)
-        session.add_result({'test_acc': float(acc), 'test_loss': float(loss)})
+        try:
+            for flag, epoch, batch, losses, accs in bilstm.fit(
+                    batch_gen, EPOCHS, BATCH_SIZE, batches=LOSS):
+                if flag:                # do epoch testing
+                    loss, acc = bilstm.test_on_batch(dev_X, dev_y)
+                    loss, acc = float(loss), float(acc)
+                    session.add_epoch(epoch, {'loss': loss, 'acc': acc})
+                    print("Epoch dev accuracy [%f]; dev loss [%f]" % (acc, loss))
+                else:                   # do batch logging
+                    log_batch(epoch, batch, losses, accs)
+            loss, acc = bilstm.test_on_batch(test_X, test_y)
+            print("Test accuracy [%f], test loss [%f]" % float(loss), float(acc))
+            session.add_result({'test_acc': float(acc), 'test_loss': float(loss)})
+        except KeyboardInterrupt:
+            loss, acc = bilstm.test_on_batch(test_X, test_y)
+            print("Test accuracy [%f], test loss [%f]" % float(loss), float(acc))
+            session.add_result({'test_acc': float(acc), 'test_loss': float(loss)})
 
-    model.save(args.model_prefix + ".weights")
+    bilstm.save(args.model_prefix + ".weights")
     idxr.save(args.model_prefix + '_indexer.json')
