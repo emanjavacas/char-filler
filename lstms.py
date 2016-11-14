@@ -6,6 +6,7 @@ from keras.layers.recurrent import LSTM
 from keras.layers.embeddings import Embedding
 from keras.layers.wrappers import Bidirectional, TimeDistributed
 
+import numpy as np
 
 def simple_lstm(n_chars, context=10, hidden_layer=128):
     in_layer = Input(shape=(context * 2, 1))
@@ -57,3 +58,122 @@ def emb_bilstm(n_chars, emb_dim, context=10, lstm_dims=128, hidden_dim=250,
     out_layer = Dense(n_chars, activation='softmax', name='output')(flattened)
     model = Model(input=in_layer, output=out_layer)
     return model
+
+
+if __name__ == '__main__':
+    from argparse import ArgumentParser
+    parser = ArgumentParser()
+    parser.add_argument('model', type=str)
+    parser.add_argument('-o', '--optimizer', type=str, default='rmsprop')
+    parser.add_argument('-R', '--rnn_layers', type=int, default=1)
+    parser.add_argument('-m', '--emb_dim', type=int, default=28)
+    parser.add_argument('-l', '--lstm_dim', type=int, default=100)
+    parser.add_argument('-H', '--hidden_dim', type=int, default=250)
+    parser.add_argument('-D', '--dropout', type=float, default=0.0)
+    parser.add_argument('-b', '--batch_size', type=int, default=50)
+    parser.add_argument('-e', '--epochs', type=int, default=10)
+    parser.add_argument('-n', '--num_examples', type=int, default=10000000)    
+    parser.add_argument('-r', '--root', type=str, required=True)
+    parser.add_argument('-p', '--model_prefix', type=str, required=True)
+    parser.add_argument('-d', '--db', type=str, default='db.json')
+    parser.add_argument('-L', '--loss', type=int, default=1,
+                        help='report loss every l batches')
+
+    from keras.utils.np_utils import to_categorical
+    from casket.nlp_utils import Corpus, Indexer
+    from casket import Experiment as E
+    import utils
+    import os, itertools
+    
+    args = parser.parse_args()
+    root = args.root
+    path = args.db
+    assert os.path.isdir(root), "Root path doesn't exist"
+
+    BATCH_SIZE = args.batch_size
+    NUM_BATCHES = int(args.num_examples / BATCH_SIZE)
+    EPOCHS = args.epochs
+    OPTIMIZER = args.optimizer
+    RNN_LAYERS = args.rnn_layers
+    EMB_DIM = args.emb_dim
+    LSTM_DIM = args.lstm_dim
+    HIDDEN_DIM = args.hidden_dim
+    DROPOUT = args.dropout
+
+    idxr = Indexer(pad='~', oov='±')
+    train = Corpus(os.path.join(root, 'train'))
+    test = Corpus(os.path.join(root, 'test'))
+    dev = Corpus(os.path.join(root, 'dev'))
+
+    print("Building encoder on train corpus")
+    idxr.fit(train.chars())  # quick pass to fit vocab
+    n_chars = idxr.vocab_len()
+
+    def build_set(corpus, vocab_len, size=2000, one_hot_enc=True):
+        dataset = itertools.islice(
+            corpus.generate(indexer=idxr, fitted=True), size)
+        X, y = list(zip(*dataset))
+        X = np.asarray(X)
+        if one_hot_enc:
+            X = one_hot(X, vocab_len)
+        y = to_categorical(y, nb_classes=vocab_len)
+        return X, y
+
+    print("Encoding test set")
+    has_emb = args.model == "emb_bilstm"
+    X_test, y_test = build_set(test, n_chars, one_hot_enc=not has_emb)
+
+    print("Encoding dev set")
+    X_dev, y_dev = build_set(dev, n_chars, one_hot_enc=not has_emb)
+
+    print("Compiling model")
+    if args.model == 'bilstm':
+        model = bilstm(
+            n_chars,
+            rnn_layers=RNN_LAYERS, lstm_dims=LSTM_DIM,
+            hidden_dim=HIDDEN_DIM, dropout=DROPOUT)
+
+    elif args.model == 'emb_bilstm':
+        model = emb_bilstm(
+            n_chars, EMB_DIM,
+            rnn_layers=RNN_LAYERS, lstm_dims=LSTM_DIM,
+            hidden_dim=HIDDEN_DIM, dropout=DROPOUT)
+    else:
+        raise ValueError("Missing model [%s]" % args.model)
+
+    model.compile(OPTIMIZER, loss='categorical_crossentropy', metrics=['accuracy'])
+    model.summary()
+
+    print("Starting training")
+    db = E.use(path, exp_id="char-fill").model(args.model)
+    with db.session(vars(args), ensure_unique=False) as session:
+        try:
+            from time import time
+            start = time()
+            for e in range(EPOCHS):
+                losses = []
+                batches = train.generate_batches(
+                    indexer=idxr, batch_size=BATCH_SIZE)
+                for b, (X, y) in enumerate(itertools.islice(batches, NUM_BATCHES)):
+                    X = np.asarray(X) if has_emb else one_hot(X, n_chars)
+                    y = to_categorical(y, nb_classes=n_chars)
+                    loss, _ = model.train_on_batch(X, y)
+                    losses.append(loss)
+                    if b % args.loss == 0:
+                        dev_loss, dev_acc = model.test_on_batch(X_dev, y_dev)
+                        utils.log_batch(
+                            e, b, np.mean(losses), losses[-1], dev_loss, dev_acc)
+                session.add_epoch(
+                    e, {'training_loss': str(np.mean(losses)),
+                        'dev_loss': str(dev_loss),
+                        'dev_acc': str(dev_acc)})
+        except KeyboardInterrupt:
+            print("Interrupted")
+        finally:
+            _, test_acc = model.test_on_batch(X_test, y_test)
+            print("Test acc [%.4f]\n" % test_acc)
+            session.add_result({'test_acc': str(test_acc)})
+            session.add_meta({'run_time': time() - start})
+            model.save_weights(args.model_prefix + '_weights.h5')
+            utils.dump_json(model.get_config(), args.model_prefix + '_config.json')
+            idxr.save(args.model_prefix + '_indexer.json')

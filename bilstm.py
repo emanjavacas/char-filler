@@ -11,22 +11,26 @@ from lasagne.nonlinearities import softmax, tanh
 import lasagne
 
 
+def accuracy(pred, target):
+    return T.mean(T.eq(T.argmax(pred, axis=1), target),
+                  dtype=theano.config.floatX)
+
+
 def bilstm_layer(input_layer, lstm_dim, batch_size, lstm_shape,
-                 add_dense=True, dropout_p=0.2, depth=1, grad_clip=100):
+                 add_dense=True, dropout_p=0.2, depth=1, **lstm_args):
     """
     batch_size: int or symbolic_var (e.g. input_var.shape[0])
     context: int
     """
     lstm = input_layer    
     for n in range(depth):
-        fwd = LSTMLayer(lstm, lstm_dim, grad_clipping=grad_clip,
-                        only_return_final=False)
+        fwd = LSTMLayer(lstm, lstm_dim, only_return_final=False, **lstm_args)
         # No need to reverse output of bwd_lstm since backwards is defined:
         # backwards : bool
         #   process the sequence backwards and then reverse the output again
         #   such that the output from the layer is always from x1x1 to xnxn.        
-        bwd = LSTMLayer(lstm, lstm_dim, grad_clipping=grad_clip,
-                        only_return_final=False, backwards=True)
+        bwd = LSTMLayer(lstm, lstm_dim, only_return_final=False,
+                        backwards=True, **lstm_args)
         if add_dense:
             # reshape for dense
             fwd = ReshapeLayer(fwd, (-1, lstm_dim))
@@ -46,7 +50,7 @@ def bilstm_layer(input_layer, lstm_dim, batch_size, lstm_shape,
 
 class BiLSTM(object):
     def __init__(self, emb_dim, lstm_dim, hid_dim, vocab_size, context,
-                 add_dense=True, dropout_p=0.2, depth=1, grad_clip=100):
+                 add_dense=True, dropout_p=0.2, depth=1, **lstm_args):
         self.emb_dim = emb_dim
         self.lstm_dim = lstm_dim
         self.vocab_size = vocab_size
@@ -62,7 +66,7 @@ class BiLSTM(object):
         lstm_shape = (batch_size, context * 2, lstm_dim)
         lstm = bilstm_layer(
             emb, lstm_dim, batch_size, lstm_shape, add_dense=add_dense,
-            dropout_p=dropout_p, depth=depth, grad_clip=grad_clip)
+            dropout_p=dropout_p, depth=depth, **lstm_args)
         # time distributed dense
         output_shape = (batch_size, context * 2, hid_dim)
         lstm = ReshapeLayer(lstm, (-1, lstm_dim))
@@ -77,34 +81,28 @@ class BiLSTM(object):
         lr, targets = T.fscalar('lr'), T.ivector('targets')
         pred = get_output(self.output)
         loss = T.nnet.categorical_crossentropy(pred, targets).mean()
-        acc = T.mean(T.eq(T.argmax(pred, axis=1), targets),
-                     dtype=theano.config.floatX)
+        acc = accuracy(pred, targets)
         params = get_all_params(self.output, trainable=True)
         updates = lasagne.updates.rmsprop(loss, params, lr)
 
         print("Compiling training function")
         self._train = theano.function(
             [input_layer.input_var, targets, lr],
-            [loss, acc],
-            updates=updates,
-            allow_input_downcast=True)
+            loss, updates=updates, allow_input_downcast=True)
 
         test_pred = get_output(self.output, deterministic=True)
         test_loss = T.nnet.categorical_crossentropy(test_pred, targets).mean()
-        test_acc = T.mean(T.eq(T.argmax(test_pred, axis=1), targets),
-                          dtype=theano.config.floatX)
+        test_acc = accuracy(test_pred, targets)
 
         print("Compiling test function")
         self._test = theano.function(
             [input_layer.input_var, targets],
-            [test_loss, test_acc],
-            allow_input_downcast=True)
+            [test_loss, test_acc], allow_input_downcast=True)
 
         print("Compiling predict function")
         self._predict = theano.function(
             [input_layer.input_var],
-            test_pred,
-            allow_input_downcast=True)
+            test_pred, allow_input_downcast=True)
 
     def train_on_batch(self, batch_X, batch_y, lr=0.01, shuffle=True):
         """
@@ -133,13 +131,13 @@ class BiLSTM(object):
         batches: int, how many batches in between loss report
         """
         for e in range(epochs):
-            losses, accs = [], []
+            losses = []
             for b, (X, y) in enumerate(batch_gen(batch_size)):
-                loss, acc = self.train_on_batch(X, y, **kwargs)
-                losses.append(loss), accs.append(acc)
+                loss = self.train_on_batch(X, y, **kwargs)
+                losses.append(loss)
                 if b % batches == 0:
-                    yield False, e, b, losses, accs
-            yield True, e, b, losses, accs
+                    yield False, e, b, losses
+            yield True, e, b, losses
 
     def predict(self, X, max_n=1, return_probs=False):
         out = self._predict(X)
@@ -177,7 +175,7 @@ if __name__ == '__main__':
     parser.add_argument('-R', '--rnn_layers', type=int, default=1)
     parser.add_argument('-m', '--emb_dim', type=int, default=64)
     parser.add_argument('-l', '--lstm_dim', type=int, default=124)
-    parser.add_argument('-H', '--hid_dim', type=int, default=248)
+    parser.add_argument('-H', '--hid_dim', type=int, default=264)
     parser.add_argument('-D', '--dropout', type=float, default=0.0)
     parser.add_argument('-f', '--add_dense', type=bool, default=False)
     parser.add_argument('-c', '--context', type=float, default=15)
@@ -187,12 +185,15 @@ if __name__ == '__main__':
     parser.add_argument('-r', '--root', type=str, required=True)
     parser.add_argument('-p', '--model_prefix', type=str, required=True)
     parser.add_argument('-d', '--db', type=str, default='db.json')
-    parser.add_argument('-L', '--loss', type=int, default=10,
+    parser.add_argument('-L', '--loss', type=int, default=50,
                         help='report loss every l batches')
+    parser.add_argument('-g', '--grad_clipping', type=int, default=0)
+    parser.add_argument('-P', '--peepholes', type=bool, default=False)
 
     from casket.nlp_utils import Corpus, Indexer
     from casket import Experiment as E
     import os
+    import utils
 
     args = parser.parse_args()
     root = args.root
@@ -224,40 +225,31 @@ if __name__ == '__main__':
             if idx <= NUM_BATCHES:
                 yield (np.asarray(X), np.asarray(y))
 
-    def log_batch(epoch, batch, losses, accs):
-        log = "Epoch [%d], batch [%d], Avg. loss [%f], Avg. acc [%f], acc [%f]"
-        print(log % (epoch, batch, np.mean(losses), np.mean(accs), accs[-1]),
-              end='\r')
-
-    dev_size = int(args.num_examples / 7.5)
+    dev_size = int(args.num_examples * 0.005)
     test_X, test_y = next(batch_gen(dev_size, corpus=test))
     dev_X, dev_y = next(batch_gen(dev_size, corpus=dev))
 
     vocab_size = idxr.vocab_len()
     bilstm = BiLSTM(emb_dim=EMB_DIM, lstm_dim=LSTM_DIM, hid_dim=HID_DIM,
                     vocab_size=vocab_size, context=CONTEXT, depth=RNN_LAYERS,
-                    add_dense=ADD_DENSE, dropout_p=DROPOUT)
+                    add_dense=ADD_DENSE, dropout_p=DROPOUT,
+                    grad_clipping=args.grad_clipping, peepholes=args.peepholes)
     
     print("Starting training")
     db = E.use(path, exp_id='lasagne-bilstm').model("")
     with db.session(vars(args), ensure_unique=False) as session:
         try:
-            for flag, epoch, batch, losses, accs in bilstm.fit(
+            for flag, e, b, losses in bilstm.fit(
                     batch_gen, EPOCHS, BATCH_SIZE, batches=LOSS):
-                if flag:                # do epoch testing
-                    loss, acc = bilstm.test_on_batch(dev_X, dev_y)
-                    loss, acc = float(loss), float(acc)
-                    session.add_epoch(epoch, {'loss': loss, 'acc': acc})
-                    print("Epoch dev accuracy [%f]; dev loss [%f]" % (acc, loss))
-                else:                   # do batch logging
-                    log_batch(epoch, batch, losses, accs)
-            loss, acc = bilstm.test_on_batch(test_X, test_y)
-            print("Test accuracy [%f], test loss [%f]" % float(loss), float(acc))
-            session.add_result({'test_acc': float(acc), 'test_loss': float(loss)})
+                loss, acc = bilstm.test_on_batch(dev_X, dev_y)
+                utils.log_batch(
+                    e, b, np.mean(losses), losses[-1], float(loss), float(acc))
         except KeyboardInterrupt:
+            print("Interrupted\n")
+        finally:
             loss, acc = bilstm.test_on_batch(test_X, test_y)
-            print("Test accuracy [%f], test loss [%f]" % float(loss), float(acc))
+            print("Test loss [%f], test acc [%f]" % (float(loss), float(acc)))
             session.add_result({'test_acc': float(acc), 'test_loss': float(loss)})
 
-    bilstm.save(args.model_prefix + ".weights")
-    idxr.save(args.model_prefix + '_indexer.json')
+            bilstm.save(args.model_prefix + ".weights")
+            idxr.save(args.model_prefix + '_indexer.json')

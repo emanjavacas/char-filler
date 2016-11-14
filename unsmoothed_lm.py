@@ -1,5 +1,14 @@
 # coding: utf-8
 
+import os
+from random import random
+from argparse import ArgumentParser
+
+from sklearn.metrics import accuracy_score
+from utils import lines_from_file
+from unsmoothed_lm import UnsmoothedLM, generate_pairs
+from casket.experiment import Experiment
+
 from collections import defaultdict, Counter
 from random import random, randint
 
@@ -83,89 +92,55 @@ class UnsmoothedLM(object):
 
 
 if __name__ == '__main__':
-    shakespeare = 'http://cs.stanford.edu/people/karpathy/' + \
-                  'char-rnn/shakespeare_input.txt'
-
-    import argparse
-    parser = argparse.ArgumentParser()
-    parser.add_argument('-o', '--order', default=6, type=int)
-    parser.add_argument('-u', '--url', nargs='+')
-    parser.add_argument('-f', '--file', nargs='+')
+    parser = ArgumentParser()
+    parser.add_argument('-r', '--root', type=str, required=True)
+    parser.add_argument('-d', '--db', type=str, default='db.json')
+    parser.add_argument('-n', '--num_lines', type=int, default=10000)
+    parser.add_argument('-o', '--order', type=int, default=6)
 
     args = parser.parse_args()
+    root = args.root
+    path = args.db
+    assert os.path.isdir(root), "Root path doesn't exist"
 
-    from six.moves.urllib import request
-    import sys
+    ORDER = args.order
+    NUM_LINES = args.num_lines
 
-    def read_urls(*urls):
-        text = []
-        for url in urls:
-            print("Downloading [%s]" % url)
-            try:
-                req = request.Request(url)
-                with request.urlopen(req) as f:
-                    for line in f.read().decode('utf-8').split('\r\n'):
-                        text += [line + "\n"]
-            except ValueError:
-                print("Couldn't download [%s]" % url)
-        return text
+    train = generate_pairs(lines_from_file(os.path.join(root, 'train')), order=ORDER)
+    test = generate_pairs(lines_from_file(os.path.join(root, 'test')), order=ORDER)
 
-    def read_files(*files):
-        import os
-        text = []
-        for fl in files:
-            if os.path.isfile(fl):
-                with open(fl, mode='r', encoding='utf-8') as f:
-                    print("Reading [%s]" % fl)
-                    for line in f.read().split('\n'):
-                        text += [line + '\n']
-            elif os.path.isdir(fl):
-                for ffl in os.listdir(fl):
-                    flpath = os.path.join(fl, ffl)
-                    if not os.path.isfile(flpath):
-                        print("Ignoring [%s]" % flpath)
-                        continue
-                    with open(flpath, mode='r', encoding='utf-8') as f:
-                        print("Reading [%s]" % flpath)
-                        for line in f.read().split('\n'):
-                            text += [line + '\n']
-        return text
+    print("Training language model")
+    model = UnsmoothedLM(order=ORDER)
+    model.train(train)
 
-    print("Fetching texts")
-    text = []
-    if args.url:
-        text += read_urls(*args.url)
-    if args.file:
-        text += read_files(*args.file)
-    if not text:
-        print("No input text, exiting...")
-        sys.exit(0)
+    tags = ('lm', 'seq')
+    params = {
+        'order': ORDER,
+        'num_lines': NUM_LINES
+    }
+    db = Experiment.use(path, tags=tags, exp_id="char-fill").model('lm')
+    y_random_true, y_random, y_ignore_true, y_ignore = [], [], [], []
+    for hist, target in test:
+        # random guess if missing pred
+        if random() > 0.005:  # downsample test corpus (1748471 examples)
+            continue
+        y_random.append(model.predict(tuple(hist), ensure_pred=True))
+        y_random_true.append(target)
+        # ignore target if missing pred
+        try:
+            y_ignore.append(model.predict(tuple(hist), ensure_pred=False))
+            y_ignore_true.append(target)
+        except KeyError:  # ignore
+            pass
 
-    model = UnsmoothedLM(order=args.order)
+    db.add_result({
+        'y_random_true': y_random_true,
+        'y_random': y_random,
+        'y_ignore_true': y_ignore_true,
+        'y_ignore': y_ignore,
+        'random_acc': accuracy_score(y_random_true, y_random),
+        'ignore_acc': accuracy_score(y_ignore_true, y_ignore)
+    }, params=params)
 
-    print("Training on corpus")
-    model.train(generate_pairs(text, order=args.order))
-
-    def ensure_res(question, validators, msg, prompt='>>> '):
-        print(question)
-        res = input(prompt)
-        while not any(filter(lambda x: x(res), validators)):
-            print(msg)
-            res = input(prompt)
-        return res
-
-    question = 'generate text (y) or quit (n)?\n'
-    msg = 'Sorry, input must be ("y", "n")'
-    validators = [lambda x: x in ('y', 'n')]
-
-    res = None
-    while res != 'n':
-        print("------ Generating text -------")
-        print("-----------------------------")
-        print(model.generate_text() + "\n")
-        print("--- End of Generated text ---")
-        print("-----------------------------")
-        res = ensure_res(question, validators, msg)
-
-    print("bye!")
-    sys.exit(0)
+    print("Accuracy on ignore [%f]" % accuracy_score(y_ignore_true, y_ignore))
+    print("Accuracy on random [%f]" % accuracy_score(y_random_true, y_random))

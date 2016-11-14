@@ -4,6 +4,19 @@ import json
 import os
 
 
+def log_batch(epoch, batch, avg_train, train_loss, dev_loss, dev_acc):
+    MSG = "Epoch [%d], Batch [%d], Avg. train loss [%.4f], " + \
+          "Train loss [%.4f], Dev loss [%.4f], Dev acc [%.4f]"
+    print(MSG % (epoch, batch, avg_train, train_loss, dev_loss, dev_acc), end='\r')
+
+
+def one_hot(m, n_classes):
+    "transforms a matrix into a one-hot encoded binary 3D tensor"
+    if isinstance(m, (list, tuple)):
+        m = np.asarray(m)
+    return (np.arange(n_classes) == m[:, :, None]-1).astype(int)
+
+
 def lines_from_file(f):
     if os.path.isfile(f):
         for line in open(f).readlines():
