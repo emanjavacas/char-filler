@@ -152,8 +152,7 @@ if __name__ == '__main__':
             start = time()
             for e in range(EPOCHS):
                 losses = []
-                batches = train.generate_batches(
-                    indexer=idxr, batch_size=BATCH_SIZE)
+                batches = train.generate_batches(indexer=idxr, batch_size=BATCH_SIZE)
                 for b, (X, y) in enumerate(itertools.islice(batches, NUM_BATCHES)):
                     X = np.asarray(X) if has_emb else one_hot(X, n_chars)
                     y = to_categorical(y, nb_classes=n_chars)
@@ -161,8 +160,9 @@ if __name__ == '__main__':
                     losses.append(loss)
                     if b % args.loss == 0:
                         dev_loss, dev_acc = model.test_on_batch(X_dev, y_dev)
-                        utils.log_batch(
-                            e, b, np.mean(losses), losses[-1], dev_loss, dev_acc)
+                        mean_loss, last_loss = np.mean(losses), losses[-1]
+                        utils.log_batch(e, b, mean_loss, last_loss, dev_loss, dev_acc)
+                print()
                 session.add_epoch(
                     e, {'training_loss': str(np.mean(losses)),
                         'dev_loss': str(dev_loss),

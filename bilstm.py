@@ -242,8 +242,10 @@ if __name__ == '__main__':
             for flag, e, b, losses in bilstm.fit(
                     batch_gen, EPOCHS, BATCH_SIZE, batches=LOSS):
                 loss, acc = bilstm.test_on_batch(dev_X, dev_y)
-                utils.log_batch(
-                    e, b, np.mean(losses), losses[-1], float(loss), float(acc))
+                loss, ascc = float(loss), float(acc)
+                utils.log_batch(e, b, np.mean(losses), losses[-1], loss, acc)
+                if flag:
+                    print()
         except KeyboardInterrupt:
             print("Interrupted\n")
         finally:
