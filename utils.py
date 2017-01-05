@@ -5,9 +5,10 @@ import os
 
 
 def log_batch(epoch, batch, avg_train, train_loss, dev_loss, dev_acc):
-    MSG = "Epoch [%d], Batch [%d], Avg. train loss [%.4f], " + \
-          "Train loss [%.4f], Dev loss [%.4f], Dev acc [%.4f]"
-    print(MSG % (epoch, batch, avg_train, train_loss, dev_loss, dev_acc), end='\r')
+    msg = "Epoch [%d], batch [%d], avg.tr. loss [%.3f], " + \
+          "Tr. loss [%.3f], dev loss [%.3f], dev acc [%.3f]"
+    print(msg % (epoch, batch, avg_train, train_loss, dev_loss, dev_acc),
+          end='\r')
 
 
 def one_hot(m, n_classes):
