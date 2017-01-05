@@ -3,8 +3,8 @@ import theano
 import theano.tensor as T
 import numpy as np
 
-from lasagne.layers import InputLayer, DenseLayer, ElemwiseSumLayer
-from lasagne.layers import LSTMLayer, EmbeddingLayer, ReshapeLayer, dropout, flatten
+from lasagne.layers import InputLayer, DenseLayer, ElemwiseSumLayer, LSTMLayer
+from lasagne.layers import EmbeddingLayer, ReshapeLayer, dropout, flatten
 from lasagne.layers import get_output, get_all_params
 from lasagne.layers import get_all_param_values, set_all_param_values
 from lasagne.nonlinearities import softmax, tanh
