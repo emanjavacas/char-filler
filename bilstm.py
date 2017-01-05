@@ -22,13 +22,13 @@ def bilstm_layer(input_layer, lstm_dim, batch_size, lstm_shape,
     batch_size: int or symbolic_var (e.g. input_var.shape[0])
     context: int
     """
-    lstm = input_layer    
+    lstm = input_layer
     for n in range(depth):
         fwd = LSTMLayer(lstm, lstm_dim, only_return_final=False, **lstm_args)
         # No need to reverse output of bwd_lstm since backwards is defined:
         # backwards : bool
         #   process the sequence backwards and then reverse the output again
-        #   such that the output from the layer is always from x1x1 to xnxn.        
+        #   such that the output from the layer is always from x1x1 to xnxn.
         bwd = LSTMLayer(lstm, lstm_dim, only_return_final=False,
                         backwards=True, **lstm_args)
         if add_dense:
@@ -42,7 +42,7 @@ def bilstm_layer(input_layer, lstm_dim, batch_size, lstm_shape,
             bwd = dropout(bwd, p=dropout_p)
             # reshape back to input format
             fwd = ReshapeLayer(fwd, lstm_shape)
-            bwd = ReshapeLayer(bwd, lstm_shape)        
+            bwd = ReshapeLayer(bwd, lstm_shape)
         # merge over lstm output dim (axis=2)
         lstm = ElemwiseSumLayer(incomings=[fwd, bwd])
     return lstm
@@ -57,9 +57,10 @@ class BiLSTM(object):
 
         # Input is integer matrices (batch_size, seq_length)
         input_layer = InputLayer(shape=(None, context * 2),
-                                 input_var=T.imatrix())        
-        self.emb_W = np.random.uniform(size=(vocab_size, emb_dim)) \
-                              .astype(np.float32)
+                                 input_var=T.imatrix())
+        self.emb_W = np.random.uniform(size=(vocab_size, emb_dim),
+                                       low=-0.05,
+                                       high=0.05).astype(np.float32)
         emb = EmbeddingLayer(input_layer, input_size=vocab_size,
                              output_size=emb_dim, W=self.emb_W)
         batch_size, _ = input_layer.input_var.shape
@@ -81,7 +82,6 @@ class BiLSTM(object):
         lr, targets = T.fscalar('lr'), T.ivector('targets')
         pred = get_output(self.output)
         loss = T.nnet.categorical_crossentropy(pred, targets).mean()
-        acc = accuracy(pred, targets)
         params = get_all_params(self.output, trainable=True)
         updates = lasagne.updates.rmsprop(loss, params, lr)
 
@@ -234,7 +234,7 @@ if __name__ == '__main__':
                     vocab_size=vocab_size, context=CONTEXT, depth=RNN_LAYERS,
                     add_dense=ADD_DENSE, dropout_p=DROPOUT,
                     grad_clipping=args.grad_clipping, peepholes=args.peepholes)
-    
+
     print("Starting training")
     db = E.use(path, exp_id='lasagne-bilstm').model("")
     with db.session(vars(args), ensure_unique=False) as session:
@@ -252,6 +252,5 @@ if __name__ == '__main__':
             loss, acc = bilstm.test_on_batch(test_X, test_y)
             print("Test loss [%f], test acc [%f]" % (float(loss), float(acc)))
             session.add_result({'test_acc': float(acc), 'test_loss': float(loss)})
-
             bilstm.save(args.model_prefix + ".weights")
             idxr.save(args.model_prefix + '_indexer.json')
