@@ -1,6 +1,5 @@
 
 import json
-import decimal
 from bottle import get, post, run, request, response, template
 
 from ..predict import load_emb_bilstm, CharFiller

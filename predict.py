@@ -1,7 +1,7 @@
 # coding: utf-8
 
 
-from lstms import emb_bilstm
+from keras_bilstm import emb_bilstm
 from corpus import Indexer, pad
 
 import numpy as np
