@@ -1,16 +1,8 @@
 # coding: utf-8
 
-
-from keras_bilstm import emb_bilstm
-from corpus import Indexer, pad
-
 import numpy as np
 
-
-def load_emb_bilstm(n_chars, emb_dim, **kwargs):
-    model = emb_bilstm(n_chars, emb_dim, **kwargs)
-    model.load_weights('fitted/emb_bilstm_weights.h5')
-    return model
+from casket.nlp_utils.corpus import pad
 
 
 def get_max_n(arr, max_n=1):
@@ -39,10 +31,28 @@ class CharFiller(object):
 
 
 if __name__ == '__main__':
-    # load charfiller
-    idxr = Indexer.load('fitted/emb_bilstm_indexer.json')
-    m = load_emb_bilstm(idxr.vocab_len(), 28,
-                        lstm_layer=250, hidden_layer=150, rnn_layers=3)
-    filler = CharFiller(m, idxr, 10)
-    filler.predict("this is a sentence to be filled with a lot of characters",
-                   15, max_n=5, with_prob=True)
+    import argparse
+    from keras.models import load_model
+    from lasagne_bilstm import BiRNN
+    from casket.nlp_utils import Indexer
+
+    parser = argparse.ArgumentParser()
+    parser.add_argument('model', help='path to model prefix')
+    parser.add_argument('-t', '--type', required=True,
+                        help='model type (keras/lasagne)')
+
+    args = parser.parse_args()
+
+    idxr = Indexer.load(args.model + '_indexer.json')
+
+    if args.type == 'keras':
+        model = load_model(args.model + '.h5')
+    elif args.type == 'lasagne':
+        model = BiRNN.load(args.model)
+    else:
+        raise ValueError("Didn't understand model [%s]" % args.model)
+
+    filler = CharFiller(model, idxr, 10)
+
+    sent = "this is a sentence to be filled with a lot of characters",
+    filler.predict(sent, 15, max_n=5, with_prob=True)

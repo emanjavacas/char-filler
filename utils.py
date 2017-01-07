@@ -31,21 +31,6 @@ def lines_from_file(f):
             yield line + '\n'
 
 
-def save_ndarray(ndarray, fname):
-    with open(fname, 'wb') as f:
-        ndarray.dump(f)
-
-
-def dump_json(obj, fname):
-    with open(fname, 'w') as f:
-        json.dump(obj, f)
-
-
-def load_json(fname):
-    with open(fname, 'r') as f:
-        return json.load(f)
-
-
 if __name__ == '__main__':
     from argparse import ArgumentParser
     import numpy as np

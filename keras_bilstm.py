@@ -1,12 +1,13 @@
 # coding: utf-8
 
 from keras.models import Model
-from keras.layers import Input, Dense, Flatten, Reshape
+from keras.layers import Input, Dense, Flatten
 from keras.layers.recurrent import LSTM
 from keras.layers.embeddings import Embedding
 from keras.layers.wrappers import Bidirectional, TimeDistributed
 
 import numpy as np
+
 
 def simple_lstm(n_chars, context=10, hidden_layer=128):
     in_layer = Input(shape=(context * 2, 1))
@@ -72,7 +73,7 @@ if __name__ == '__main__':
     parser.add_argument('-D', '--dropout', type=float, default=0.0)
     parser.add_argument('-b', '--batch_size', type=int, default=50)
     parser.add_argument('-e', '--epochs', type=int, default=10)
-    parser.add_argument('-n', '--num_examples', type=int, default=10000000)    
+    parser.add_argument('-n', '--num_examples', type=int, default=10000000)
     parser.add_argument('-r', '--root', type=str, required=True)
     parser.add_argument('-p', '--model_prefix', type=str, required=True)
     parser.add_argument('-d', '--db', type=str, default='db.json')
@@ -82,9 +83,11 @@ if __name__ == '__main__':
     from keras.utils.np_utils import to_categorical
     from casket.nlp_utils import Corpus, Indexer
     from casket import Experiment as E
-    import utils
-    import os, itertools
-    
+    import os
+    import itertools
+
+    from utils import log_batch, one_hot
+
     args = parser.parse_args()
     root = args.root
     path = args.db
@@ -152,16 +155,18 @@ if __name__ == '__main__':
             start = time()
             for e in range(EPOCHS):
                 losses = []
-                batches = train.generate_batches(indexer=idxr, batch_size=BATCH_SIZE)
-                for b, (X, y) in enumerate(itertools.islice(batches, NUM_BATCHES)):
+                batches = train.generate_batches(
+                    indexer=idxr, batch_size=BATCH_SIZE),
+                batches = itertools.islice(batches, NUM_BATCHES)
+                for b, (X, y) in enumerate(batches):
                     X = np.asarray(X) if has_emb else one_hot(X, n_chars)
                     y = to_categorical(y, nb_classes=n_chars)
                     loss, _ = model.train_on_batch(X, y)
                     losses.append(loss)
                     if b % args.loss == 0:
                         dev_loss, dev_acc = model.test_on_batch(X_dev, y_dev)
-                        mean_loss, last_loss = np.mean(losses), losses[-1]
-                        utils.log_batch(e, b, mean_loss, last_loss, dev_loss, dev_acc)
+                        avg_loss, last_loss = np.mean(losses), losses[-1]
+                        log_batch(e, b, avg_loss, last_loss, dev_loss, dev_acc)
                 print()
                 session.add_epoch(
                     e, {'training_loss': str(np.mean(losses)),
@@ -174,6 +179,5 @@ if __name__ == '__main__':
             print("Test acc [%.4f]\n" % test_acc)
             session.add_result({'test_acc': str(test_acc)})
             session.add_meta({'run_time': time() - start})
-            model.save_weights(args.model_prefix + '_weights.h5')
-            utils.dump_json(model.get_config(), args.model_prefix + '_config.json')
+            model.save(args.model_prefix + '.h5')
             idxr.save(args.model_prefix + '_indexer.json')
