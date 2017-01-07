@@ -12,6 +12,19 @@ from lasagne.nonlinearities import softmax, tanh
 import lasagne
 
 
+# Global model defaults
+defs = {
+    'depth': 1,
+    'cell': 'lstm',
+    'emb_dim': 64,
+    'rnn_dim': 124,
+    'hid_dim': 264,
+    'dropout': 0.0,
+    'context': 15,
+    'add_dense': False
+}
+
+
 def accuracy(pred, target):
     return T.mean(T.eq(T.argmax(pred, axis=1), target),
                   dtype=theano.config.floatX)
@@ -36,8 +49,8 @@ def bid_layer(input_layer, rnn_dim, batch_size, rnn_shape, cell,
         # backwards : bool
         #   process the sequence backwards and then reverse the output again
         #   such that the output from the layer is always from x1x1 to xnxn.
-        bwd = cell(rnn, rnn_dim, only_return_final=False,
-                   backwards=True, **cell_args)
+        bwd = cell(rnn, rnn_dim, only_return_final=False, backwards=True,
+                   **cell_args)
         if add_dense:
             # reshape for dense
             fwd = ReshapeLayer(fwd, (-1, rnn_dim))
@@ -57,11 +70,19 @@ def bid_layer(input_layer, rnn_dim, batch_size, rnn_shape, cell,
 
 class BiRNN(object):
     def __init__(self, emb_dim, rnn_dim, hid_dim, vocab_size, context,
-                 cell='lstm', add_dense=True, dropout_p=0.2, depth=1, **cell_args):
-        self.cell = cell
+                 cell='lstm', add_dense=True, dropout_p=0.2, depth=1,
+                 prod=False, **cell_args):
         self.emb_dim = emb_dim
         self.rnn_dim = rnn_dim
+        self.hid_dim = hid_dim
         self.vocab_size = vocab_size
+        self.context = context
+        self.cell = cell
+        self.add_dense = add_dense
+        self.depth = depth
+        self.cell_args = cell_args
+
+        self.prod = prod
 
         # Input is integer matrices (batch_size, seq_length)
         input_layer = InputLayer(shape=(None, context * 2),
@@ -83,34 +104,39 @@ class BiRNN(object):
         rnn = ReshapeLayer(dropout(rnn, p=dropout_p), output_shape)
         # flatten
         rnn = flatten(rnn)
-        self.output = DenseLayer(rnn, num_units=vocab_size, nonlinearity=softmax)
+        self.output = DenseLayer(
+            rnn, num_units=vocab_size, nonlinearity=softmax)
 
-        # T.nnet.categorical_crossentropy allows to represent true distribution
-        # as an integer vector (implicitely casting to a one-hot matrix)
-        lr, targets = T.fscalar('lr'), T.ivector('targets')
-        pred = get_output(self.output)
-        loss = T.nnet.categorical_crossentropy(pred, targets).mean()
-        params = get_all_params(self.output, trainable=True)
-        updates = lasagne.updates.rmsprop(loss, params, lr)
+        # Don't compile train and test functions in production mode
+        if not prod:
+            # T.nnet.categorical_crossentropy allows to represent true dist
+            # as an integer vector (implicitely casting to a one-hot matrix)
+            lr, targets = T.fscalar('lr'), T.ivector('targets')
+            pred = get_output(self.output)
+            loss = T.nnet.categorical_crossentropy(pred, targets).mean()
+            params = get_all_params(self.output, trainable=True)
+            updates = lasagne.updates.rmsprop(loss, params, lr)
+            print("Compiling training function")
+            self._train = theano.function(
+                [input_layer.input_var, targets, lr],
+                loss, updates=updates, allow_input_downcast=True)
 
-        print("Compiling training function")
-        self._train = theano.function(
-            [input_layer.input_var, targets, lr],
-            loss, updates=updates, allow_input_downcast=True)
+            test_pred = get_output(self.output, deterministic=True)
+            test_loss = T.nnet.categorical_crossentropy(test_pred, targets).mean()
+            test_acc = accuracy(test_pred, targets)
 
-        test_pred = get_output(self.output, deterministic=True)
-        test_loss = T.nnet.categorical_crossentropy(test_pred, targets).mean()
-        test_acc = accuracy(test_pred, targets)
-
-        print("Compiling test function")
-        self._test = theano.function(
-            [input_layer.input_var, targets],
-            [test_loss, test_acc], allow_input_downcast=True)
+            print("Compiling test function")
+            self._test = theano.function(
+                [input_layer.input_var, targets],
+                [test_loss, test_acc], allow_input_downcast=True)
 
         print("Compiling predict function")
+        if prod:
+            pred = get_output(self.output, deterministic=True)
+        else:
+            pred = test_pred
         self._predict = theano.function(
-            [input_layer.input_var],
-            test_pred, allow_input_downcast=True)
+            [input_layer.input_var], pred, allow_input_downcast=True)
 
     def train_on_batch(self, batch_X, batch_y, lr=0.01, shuffle=True):
         """
@@ -119,6 +145,8 @@ class BiRNN(object):
         batch_X: np.array(size=(batch_size, seq_len), dtype=np.int)
         batch_y: np.array(size=(batch_size, vocab_size))
         """
+        if self.prod:
+            raise ValueError("No training is possible in production mode")
         assert batch_X.shape[0] == batch_y.shape[0]
         if shuffle:
             p = np.random.permutation(batch_X.shape[0])
@@ -133,6 +161,8 @@ class BiRNN(object):
         batch_X: np.array(size=(batch_size, seq_len), dtype=np.int)
         batch_y: np.array(size=(batch_size, vocab_size))
         """
+        if self.prod:
+            raise ValueError("No testing is possible in production mode")
         return self._test(batch_X, batch_y)
 
     def fit(self, batch_gen, epochs, batch_size, batches=1, **kwargs):
@@ -144,6 +174,8 @@ class BiRNN(object):
         batch_size: int, input to batch_gen
         batches: int, how many batches in between loss report
         """
+        if self.prod:
+            raise ValueError("No training is possible in production mode")
         for e in range(epochs):
             losses = []
             for b, (X, y) in enumerate(batch_gen(batch_size)):
@@ -164,36 +196,58 @@ class BiRNN(object):
 
     def save(self, prefix):
         import json
-        network_weights = get_all_param_values(self.output)
-        np.savez(prefix + ".npz", network_weights)
-        with open(prefix + ".json", "w") as f:
+        # save weights
+        np.savez(prefix + "_weights.npz", *get_all_param_values(self.output))
+        # save network config params
+        with open(prefix + "_config.json", "w") as f:
             f.write(json.dumps(
-                {"vocab_size": self.vocab_size,
-                 "emb_dim": self.emb_dim,
-                 "rnn_dim": self.rnn_dim}))
+                {"emb_dim": self.emb_dim,
+                 "rnn_dim": self.rnn_dim,
+                 "hid_dim": self.hid_dim,
+                 "vocab_size": self.vocab_size,
+                 "context": self.context,
+                 "cell": self.cell,
+                 "add_dense": self.add_dense,
+                 "depth": self.depth,
+                 "cell_args": self.cell_args}))
 
     @classmethod
-    def load(cls, prefix):
+    def load(cls, prefix, prod=True):
         import json
-        with open(prefix + ".json") as data:
-            pms = json.load(data)
-        network = cls(pms['emb_dim'], pms['rnn_dim'], pms['vocab_size'])
-        with np.load(prefix + '.npz') as data:
-            set_all_param_values(network.output)
+        with open(prefix + "_config.json") as data:
+            params = json.load(data)
+        network = cls(
+            # positional params
+            params.get('emb_dim', defs['emb_dim']),
+            params.get('rnn_dim', defs['rnn_dim']),
+            params.get('hid_dim', defs['hid_dim']),
+            params['vocab_size'],
+            params.get('context', defs['context']),
+            # keyword params
+            prod=prod,
+            cell=params.get('cell', defs['cell']),
+            add_dense=params.get('add_dense', defs['add_dense']),
+            depths=params.get('depth', defs['depth']),
+            # kwarg params
+            **params.get('cell_args', {}))
+        with np.load(prefix + '_weights.npz') as data:
+            params = [data['arr_%d' % i] for i in range(len(data.files))]
+            set_all_param_values(network.output, params)
         return network
 
 
 if __name__ == '__main__':
     from argparse import ArgumentParser
     parser = ArgumentParser()
-    parser.add_argument('-R', '--rnn_layers', type=int, default=1)
-    parser.add_argument('-C', '--cell', type=str, default='lstm')
-    parser.add_argument('-m', '--emb_dim', type=int, default=64)
-    parser.add_argument('-l', '--rnn_dim', type=int, default=124)
-    parser.add_argument('-H', '--hid_dim', type=int, default=264)
-    parser.add_argument('-D', '--dropout', type=float, default=0.0)
-    parser.add_argument('-f', '--add_dense', action='store_true')
-    parser.add_argument('-c', '--context', type=float, default=15)
+    parser.add_argument('-R', '--depth', type=int, default=defs['depth'])
+    parser.add_argument('-C', '--cell', type=str, default=defs['cell'])
+    parser.add_argument('-m', '--emb_dim', type=int, default=defs['emb_dim'])
+    parser.add_argument('-l', '--rnn_dim', type=int, default=defs['rnn_dim'])
+    parser.add_argument('-H', '--hid_dim', type=int, default=defs['hid_dim'])
+    parser.add_argument('-D', '--dropout', type=float, default=defs['dropout'])
+    parser.add_argument('-f', '--add_dense', action='store_true',
+                        default=defs['add_dense'])
+    parser.add_argument('-c', '--context', type=float, default=defs['context'])
     parser.add_argument('-b', '--batch_size', type=int, default=1024)
     parser.add_argument('-e', '--epochs', type=int, default=10)
     parser.add_argument('-n', '--num_examples', type=int, default=10000000)
@@ -219,7 +273,7 @@ if __name__ == '__main__':
     BATCH_SIZE = args.batch_size
     NUM_BATCHES = int(args.num_examples / BATCH_SIZE)
     EPOCHS = args.epochs
-    RNN_LAYERS = args.rnn_layers
+    DEPTH = args.depth
     EMB_DIM = args.emb_dim
     RNN_DIM = args.rnn_dim
     HID_DIM = args.hid_dim
@@ -251,7 +305,7 @@ if __name__ == '__main__':
 
     vocab_size = idxr.vocab_len()
     birnn = BiRNN(EMB_DIM, RNN_DIM, HID_DIM, vocab_size, CONTEXT,
-                  depth=RNN_LAYERS, add_dense=ADD_DENSE, dropout_p=DROPOUT,
+                  depth=DEPTH, add_dense=ADD_DENSE, dropout_p=DROPOUT,
                   grad_clipping=args.grad_clipping, peepholes=args.peepholes)
 
     print("Starting training")
@@ -271,5 +325,5 @@ if __name__ == '__main__':
             loss, acc = birnn.test_on_batch(test_X, test_y)
             print("Test loss [%f], test acc [%f]" % (float(loss), float(acc)))
             session.add_result({'test_acc': float(acc), 'test_loss': float(loss)})
-            birnn.save(args.model_prefix + ".weights")
+            birnn.save(args.model_prefix)
             idxr.save(args.model_prefix + '_indexer.json')
