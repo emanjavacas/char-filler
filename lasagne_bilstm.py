@@ -11,6 +11,7 @@ from lasagne.layers import get_all_param_values, set_all_param_values
 from lasagne.nonlinearities import softmax, tanh
 import lasagne
 
+np.random.seed(1002)
 
 # Global model defaults
 defs = {
@@ -245,7 +246,7 @@ if __name__ == '__main__':
     parser.add_argument('-l', '--rnn_dim', type=int, default=defs['rnn_dim'])
     parser.add_argument('-H', '--hid_dim', type=int, default=defs['hid_dim'])
     parser.add_argument('-D', '--dropout', type=float, default=defs['dropout'])
-    parser.add_argument('-f', '--add_dense', action='store_true',
+    parser.add_argument('-f', '--add-dense', action='store_true',
                         default=defs['add_dense'])
     parser.add_argument('-c', '--context', type=float, default=defs['context'])
     parser.add_argument('-b', '--batch_size', type=int, default=1024)
@@ -295,12 +296,18 @@ if __name__ == '__main__':
             if idx <= NUM_BATCHES:
                 yield (np.asarray(X), np.asarray(y))
 
-    dev_size = int(args.num_examples * 0.005)
-    test = list(batch_gen(dev_size, corpus=test))
-    test_X, test_y = test[np.random.randint(len(test))]
+    dev_test_batch_size = int(args.num_examples * 0.005)
+
+    test = list(batch_gen(dev_test_batch_size, corpus=test))
+    test_batch_choice = np.random.randint(len(test))
+    test_X, test_y = test[test_batch_choice]
+    print("test batch [%d]" % test_batch_choice)
     del test
-    dev = list(batch_gen(dev_size, corpus=dev))
-    dev_X, dev_y = dev[np.random.randint(len(dev))]
+
+    dev = list(batch_gen(dev_test_batch_size, corpus=dev))    
+    dev_batch_choice = np.random.randint(len(dev))
+    dev_X, dev_y = dev[dev_batch_choice]
+    print("dev batch [%d]" % dev_batch_choice)
     del dev
 
     vocab_size = idxr.vocab_len()
